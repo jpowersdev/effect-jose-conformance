@@ -18,12 +18,13 @@ package is linked directly from source, so no build step is needed.
 | `test/keys.test.ts` | RFC 7638 thumbprints, PEM (SPKI/PKCS#8) import and export, key generation and JWK import validation match jose. |
 | `test/jwks.test.ts` | Local key set selection matches jose; remote key sets fetch lazily, cache, honour the refetch cooldown, and fail with typed errors. |
 | `test/rfc7520.test.ts` | The worked examples from RFC 7520, with exact byte-for-byte reproduction wherever the inputs are deterministic. |
+| `test/resolvers.test.ts` | Embedded-key verification matches jose's `EmbeddedJWK`; several matching keys fail by default like jose, and the explicit `multipleMatches: "tryEach"` option gives the same result as looping over jose's candidates; `KeyValueStore` storage reuses a fetched key set across fresh resolvers like jose's `jwksCache`. |
 | `test/errors.test.ts` | Each failure kind is a distinct tagged error, handled individually with `Effect.catchTag`. |
 | `test/divergences.test.ts` | Each intentional difference from jose, pinned so it stays deliberate (see below). |
 
 ## Intentional differences from jose
 
-- **Stricter:** duplicate `crit` values are rejected on verification, and so is non-canonical base64url (padding or whitespace).
+- **Stricter:** duplicate `crit` values are rejected on verification, and so is non-canonical base64url (padding or whitespace). An embedded `jwk` must be in the protected header.
 - **Typed errors:** a key whose curve doesn't match the algorithm fails with `InvalidKeyError` and malformed PEM with `MalformedKeyError`; jose leaks raw Web Crypto exceptions in these cases. A key of the wrong type for the algorithm (e.g. RSA for ES256) is `InvalidKeyError`, where jose reports "not supported".
 - **Unsupported on purpose:** JWE compression (`zip: "DEF"`, discouraged by RFC 8725), unsecured `alg: none` JWTs, RSA1_5, ES256K and ML-DSA.
 - **Conventions:** durations are Effect `Duration` inputs (a bare number means milliseconds); unencoded flattened payloads are kept attached rather than detached.

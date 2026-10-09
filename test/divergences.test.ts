@@ -54,6 +54,18 @@ describe("stricter than jose", () => {
     })
   })
 
+  it("requires an embedded jwk to be integrity protected; jose's EmbeddedJWK also accepts it from the unprotected header", async () => {
+    const k = await keysFor("ES256")
+    const jws = await new jose.FlattenedSign(enc.encode("x"))
+      .setProtectedHeader({ alg: "ES256" })
+      .setUnprotectedHeader({ jwk: k.verifyOrDecrypt.jwk as jose.JWK })
+      .sign(k.signOrEncrypt.jose as any)
+    expect(await settle(jose.flattenedVerify(jws, jose.EmbeddedJWK))).toEqual({ ok: true })
+    expect(await tagged(run(JsonWebSignature.verifyFlattened(jws as any, JsonWebSignature.embeddedKey)))).toBe(
+      "MalformedJwsError"
+    )
+  })
+
   it("reports a key of the wrong type for the algorithm as InvalidKeyError; jose reports it as not supported", async () => {
     const [rsa, es] = await Promise.all([keysFor("RS256"), keysFor("ES256")])
     const token = await new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "ES256" }).sign(es.signOrEncrypt.jose as any)
