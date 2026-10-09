@@ -33,3 +33,13 @@ export const run = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Promise<A
 /** Runs an effect producing a `Redacted` token and returns the token text, for handing to jose. */
 export const runToken = <E>(effect: Effect.Effect<Redacted.Redacted<string>, E, Crypto.Crypto>): Promise<string> =>
   run(effect).then(Redacted.value)
+
+import { JsonWebAlgorithm } from "effect/jose"
+
+/**
+ * Every supported signature algorithm. Passing this as `algorithms` matches
+ * jose's behaviour when no allow list is given, for like-for-like parity
+ * comparisons. Real code should list only the algorithms it expects.
+ */
+export const anySignatureAlgorithm: ReadonlyArray<JsonWebAlgorithm.SignatureAlgorithm> =
+  JsonWebAlgorithm.signatureAlgorithms

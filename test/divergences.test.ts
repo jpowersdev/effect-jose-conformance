@@ -12,7 +12,7 @@ import { jwksEndpoint } from "../src/jwksEndpoint.ts"
 import { beforeAll, describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle, tagged } from "../src/outcome.ts"
-import { run } from "../src/runtime.ts"
+import { run, anySignatureAlgorithm } from "../src/runtime.ts"
 
 const enc = new TextEncoder()
 const b64u = (s: string | Uint8Array) => jose.base64url.encode(s)
@@ -33,13 +33,13 @@ describe("stricter than jose", () => {
   it("rejects duplicate crit values on verification (RFC 7515 §4.1.11); jose only checks when signing", async () => {
     const token = await forge(b64u('{"alg":"HS256","crit":["b64","b64"],"b64":true}'), b64u("payload"))
     expect(await settle(jose.compactVerify(token, secret))).toEqual({ ok: true })
-    expect(await settle(run(JsonWebSignature.verifyCompact(token, secret)))).toEqual({ ok: false, code: "ERR_JWS_INVALID" })
+    expect(await settle(run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm })))).toEqual({ ok: false, code: "ERR_JWS_INVALID" })
   })
 
   it("rejects padded or whitespace-containing base64url segments; jose accepts them", async () => {
     const header = b64u('{"alg":"HS256"}')
     const padded = await forge(header, b64u("payloa") + "=")
-    const outcomes = [await settle(jose.compactVerify(padded, secret)), await settle(run(JsonWebSignature.verifyCompact(padded, secret)))]
+    const outcomes = [await settle(jose.compactVerify(padded, secret)), await settle(run(JsonWebSignature.verifyCompact(padded, secret, { algorithms: anySignatureAlgorithm })))]
     expect(outcomes[1]).toEqual({ ok: false, code: "ERR_JWS_INVALID" })
     // jose's acceptance depends on the runtime's base64 decoder; record what it did.
     expect(outcomes[0].ok === true || outcomes[0].ok === false).toBe(true)
@@ -52,7 +52,7 @@ describe("stricter than jose", () => {
     expect(joseOutcome.ok).toBe(false)
     // The exact exception depends on the runtime's Web Crypto; it is never a jose error code.
     expect(joseOutcome.ok === false && !joseOutcome.code.startsWith("ERR_")).toBe(true)
-    expect(await settle(run(JsonWebSignature.verifyCompact(token, p384.verifyOrDecrypt.jwk as any)))).toEqual({
+    expect(await settle(run(JsonWebSignature.verifyCompact(token, p384.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm })))).toEqual({
       ok: false,
       code: "ERR_JWK_INVALID"
     })
@@ -65,7 +65,7 @@ describe("stricter than jose", () => {
       .setUnprotectedHeader({ jwk: k.verifyOrDecrypt.jwk as jose.JWK })
       .sign(k.signOrEncrypt.jose as any)
     expect(await settle(jose.flattenedVerify(jws, jose.EmbeddedJWK))).toEqual({ ok: true })
-    expect(await tagged(run(JsonWebSignature.verifyFlattened(jws as any, JsonWebSignature.embeddedKey)))).toBe(
+    expect(await tagged(run(JsonWebSignature.verifyFlattened(jws as any, JsonWebSignature.embeddedKey, { algorithms: anySignatureAlgorithm })))).toBe(
       "MalformedJwsError"
     )
   })
@@ -77,7 +77,7 @@ describe("stricter than jose", () => {
       ok: false,
       code: "ERR_JOSE_NOT_SUPPORTED"
     })
-    expect(await tagged(run(JsonWebSignature.verifyCompact(token, rsa.verifyOrDecrypt.jwk as any)))).toBe("InvalidKeyError")
+    expect(await tagged(run(JsonWebSignature.verifyCompact(token, rsa.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm })))).toBe("InvalidKeyError")
   })
 
   it("reports malformed PEM as MalformedKeyError; jose leaks a raw runtime exception", async () => {
@@ -100,9 +100,14 @@ describe("unsupported on purpose", () => {
   it("has no unsecured (alg: none) JWT support; jose offers UnsecuredJWT", async () => {
     const unsecured = new jose.UnsecuredJWT({ sub: "x" }).encode()
     expect(jose.UnsecuredJWT.decode(unsecured).payload.sub).toBe("x")
-    // Verifying an unsecured token is rejected identically by both libraries.
+    // Verifying an unsecured token is rejected by both libraries: "none" is never
+    // an allowed algorithm (effect/jose always has an allow list), and it is not
+    // a supported one (jose without an allow list).
     expect(await settle(jose.jwtVerify(unsecured, secret))).toEqual({ ok: false, code: "ERR_JOSE_NOT_SUPPORTED" })
-    expect(await settle(run(JsonWebToken.verify(unsecured, secret)))).toEqual({ ok: false, code: "ERR_JOSE_NOT_SUPPORTED" })
+    expect(await settle(run(JsonWebToken.verify(unsecured, secret, { algorithms: anySignatureAlgorithm })))).toEqual({
+      ok: false,
+      code: "ERR_JOSE_ALG_NOT_ALLOWED"
+    })
   })
 })
 
@@ -121,11 +126,11 @@ describe("different conventions", () => {
     const token = await new jose.SignJWT({ exp: 1_700_000_000 - 5 }).setProtectedHeader({ alg: "HS256" }).sign(secret)
     // 10 means 10 seconds to jose but 10 milliseconds to effect/jose.
     expect(await settle(jose.jwtVerify(token, secret, { currentDate: now, clockTolerance: 10 }))).toEqual({ ok: true })
-    expect(await settle(run(JsonWebToken.verify(token, secret, { currentDate: now, clockTolerance: 10 })))).toEqual({
+    expect(await settle(run(JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm, currentDate: now, clockTolerance: 10 })))).toEqual({
       ok: false,
       code: "ERR_JWT_EXPIRED"
     })
-    expect(await settle(run(JsonWebToken.verify(token, secret, { currentDate: now, clockTolerance: "10 seconds" })))).toEqual({
+    expect(await settle(run(JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm, currentDate: now, clockTolerance: "10 seconds" })))).toEqual({
       ok: true
     })
   })
@@ -136,7 +141,7 @@ describe("hardening jose does not do", () => {
     const short = new Uint8Array(16)
     const token = await new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "HS256" }).sign(short)
     expect(await settle(jose.compactVerify(token, short))).toEqual({ ok: true })
-    expect(await tagged(run(JsonWebSignature.verifyCompact(token, short)))).toBe("InvalidKeyError")
+    expect(await tagged(run(JsonWebSignature.verifyCompact(token, short, { algorithms: anySignatureAlgorithm })))).toBe("InvalidKeyError")
     expect(await tagged(run(JsonWebSignature.signCompact("x", { key: short, protectedHeader: { alg: "HS256" } })))).toBe(
       "InvalidKeyError"
     )
@@ -145,8 +150,8 @@ describe("hardening jose does not do", () => {
   it("caps compact tokens at 64 KiB by default, adjustable with maxTokenLength; jose has no limit", async () => {
     const token = await new jose.CompactSign(enc.encode("x".repeat(70_000))).setProtectedHeader({ alg: "HS256" }).sign(secret)
     expect(await settle(jose.compactVerify(token, secret))).toEqual({ ok: true })
-    expect(await tagged(run(JsonWebSignature.verifyCompact(token, secret)))).toBe("JwsTooLargeError")
-    expect(await settle(run(JsonWebSignature.verifyCompact(token, secret, { maxTokenLength: 200_000 })))).toEqual({
+    expect(await tagged(run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm })))).toBe("JwsTooLargeError")
+    expect(await settle(run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm, maxTokenLength: 200_000 })))).toEqual({
       ok: true
     })
   })
@@ -159,7 +164,7 @@ describe("hardening jose does not do", () => {
             Effect.promise(() =>
               new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "ES256", kid: "k" }).sign(signingKey)
             ),
-            (token) => JsonWebSignature.verifyCompact(token, resolver)
+            (token) => JsonWebSignature.verifyCompact(token, resolver, { algorithms: anySignatureAlgorithm })
           )).pipe(Effect.provide(FetchHttpClient.layer))
       )
     let signingKey: CryptoKey
@@ -195,5 +200,35 @@ describe("hardening jose does not do", () => {
         ok: true
       })
     })
+  })
+})
+
+describe("stricter defaults", () => {
+  it("requires an explicit algorithms list unless the key is a Crypto.Key; jose accepts any compatible algorithm", async () => {
+    const token = await new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "HS384" }).sign(
+      new Uint8Array(48)
+    )
+    expect(await settle(jose.compactVerify(token, new Uint8Array(48)))).toEqual({ ok: true })
+    const verifyUntyped = JsonWebSignature.verifyCompact as (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown>
+    expect(await tagged(run(verifyUntyped(token, new Uint8Array(48)) as any))).toBe("TypeError")
+    expect(await settle(run(JsonWebSignature.verifyCompact(token, new Uint8Array(48), { algorithms: ["HS256"] })))).toEqual({
+      ok: false,
+      code: "ERR_JOSE_ALG_NOT_ALLOWED"
+    })
+  })
+
+  it("requires exp by default (requireExpiration: false opts out); jose does not", async () => {
+    const token = await new jose.SignJWT({ sub: "x" }).setProtectedHeader({ alg: "HS256" }).sign(secret)
+    expect(await settle(jose.jwtVerify(token, secret))).toEqual({ ok: true })
+    expect(await settle(run(JsonWebToken.verify(token, secret, { algorithms: ["HS256"] })))).toEqual({
+      ok: false,
+      code: "ERR_JWT_CLAIM_VALIDATION_FAILED"
+    })
+    expect(await settle(run(JsonWebToken.verify(token, secret, { algorithms: ["HS256"], requireExpiration: false })))).toEqual({
+      ok: true
+    })
+    expect(await tagged(run(JsonWebToken.sign({ sub: "x" }, { key: secret, protectedHeader: { alg: "HS256" } })))).toBe(
+      "ClaimValidationError"
+    )
   })
 })

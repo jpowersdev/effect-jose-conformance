@@ -1,7 +1,7 @@
 import * as jose from "jose"
 import { JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
-import { run, runToken } from "../src/runtime.ts"
+import { run, runToken, anySignatureAlgorithm } from "../src/runtime.ts"
 
 const secret = new TextEncoder().encode("a-string-secret-at-least-256-bits-long")
 
@@ -15,7 +15,7 @@ describe("smoke", () => {
     const { publicKey, privateKey } = await jose.generateKeyPair("ES256", { extractable: true })
     const jws = await new jose.CompactSign(new TextEncoder().encode("hi")).setProtectedHeader({ alg: "ES256" }).sign(privateKey)
     const jwk = await jose.exportJWK(publicKey)
-    const out = await run(JsonWebSignature.verifyCompact(jws, jwk as any))
+    const out = await run(JsonWebSignature.verifyCompact(jws, jwk as any, { algorithms: anySignatureAlgorithm }))
     expect(new TextDecoder().decode(out.payload)).toBe("hi")
   })
 })

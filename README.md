@@ -25,6 +25,7 @@ package is linked directly from source, so no build step is needed.
 ## Intentional differences from jose
 
 - **Stricter:** duplicate `crit` values are rejected on verification, and so is padded or whitespace-containing base64url. An embedded `jwk` must be in the protected header. HMAC keys must be at least as long as the hash (RFC 7518 §3.2).
+- **Stricter defaults:** verification requires an explicit `algorithms` list unless the key is a `Crypto.Key` (which is bound to one algorithm), and JWTs must have `exp` unless `requireExpiration: false`. Parity tests pass every supported algorithm and `requireExpiration: false` to compare like with like.
 - **Hardened by default:** compact tokens are capped at 64 KiB (`maxTokenLength`). Remote key sets require HTTPS (unless `allowInsecureHttp` is set), refuse URLs with credentials or a fragment, refuse redirects, and cap responses at 128 KiB and 64 keys. jose does none of these.
 - **Typed errors:** a key whose curve doesn't match the algorithm fails with `InvalidKeyError` and malformed PEM with `MalformedKeyError`; jose leaks raw Web Crypto exceptions in these cases. A key of the wrong type for the algorithm (e.g. RSA for ES256) is `InvalidKeyError`, where jose reports "not supported".
 - **Unsupported on purpose:** JWE compression (`zip: "DEF"`, discouraged by RFC 8725), unsecured `alg: none` JWTs, RSA1_5, ES256K and ML-DSA.

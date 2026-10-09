@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect"
 import { JsonWebAlgorithm, JsonWebEncryption, JsonWebKey, JsonWebKeySet, JsonWebSignature, JsonWebToken } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { joseCodeFor, tagged } from "../src/outcome.ts"
-import { run } from "../src/runtime.ts"
+import { run, anySignatureAlgorithm } from "../src/runtime.ts"
 
 const secret = new TextEncoder().encode("a-string-secret-at-least-256-bits-long")
 
@@ -42,7 +42,7 @@ describe("error types", () => {
   it("errors can be handled individually with catchTag", async () => {
     const token = await new jose.SignJWT({}).setProtectedHeader({ alg: "HS256" }).setExpirationTime(1).sign(secret)
     const outcome = await run(
-      JsonWebToken.verify(token, secret).pipe(
+      JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm }).pipe(
         Effect.as("valid"),
         Effect.catchTag("TokenExpiredError", (e) => Effect.succeed(`expired via ${e.claim}`)),
         Effect.catchTag("SignatureVerificationError", () => Effect.succeed("bad signature"))
@@ -56,6 +56,6 @@ describe("error types", () => {
     const error = await run(Effect.flip(JsonWebSignature.verifyCompact(token, secret, { algorithms: ["ES256"] })))
     expect(error._tag).toBe("AlgorithmNotAllowedError")
     expect(error._tag === "AlgorithmNotAllowedError" && [error.parameter, error.algorithm]).toEqual(["alg", "HS256"])
-    expect(await tagged(run(JsonWebSignature.verifyCompact("a.b", secret)))).toBe("MalformedJwsError")
+    expect(await tagged(run(JsonWebSignature.verifyCompact("a.b", secret, { algorithms: anySignatureAlgorithm })))).toBe("MalformedJwsError")
   })
 })

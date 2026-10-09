@@ -2,7 +2,7 @@ import * as jose from "jose"
 import { JsonWebKey, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
-import { run, runToken } from "../src/runtime.ts"
+import { run, runToken, anySignatureAlgorithm } from "../src/runtime.ts"
 
 const algorithms = [
   "HS256", "HS384", "HS512",
@@ -58,7 +58,7 @@ describe.each(algorithms)("JWS %s", (alg) => {
     const joseJws = await new jose.FlattenedSign(payload).setProtectedHeader({ alg }).setUnprotectedHeader({
       kid: "u2"
     }).sign(keys.signOrEncrypt.jose as any)
-    const verified = await run(JsonWebSignature.verifyFlattened(joseJws as any, keys.verifyOrDecrypt.jwk as any))
+    const verified = await run(JsonWebSignature.verifyFlattened(joseJws as any, keys.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
     expect(verified.unprotectedHeader).toEqual({ kid: "u2" })
   })
 
@@ -74,7 +74,7 @@ describe.each(algorithms)("JWS %s", (alg) => {
     // jose emits unencoded payloads detached (payload: ""); supply it for verification.
     expect(joseJws.payload).toBe("")
     const verified = await run(
-      JsonWebSignature.verifyFlattened({ ...joseJws, payload: "$.02" } as any, keys.verifyOrDecrypt.jwk as any)
+      JsonWebSignature.verifyFlattened({ ...joseJws, payload: "$.02" } as any, keys.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm })
     )
     expect(decode(verified.payload)).toBe("$.02")
   })
@@ -96,6 +96,6 @@ describe("JWS general JSON serialization", () => {
     sign.addSignature(es.signOrEncrypt.jose as any).setProtectedHeader({ alg: "ES256" })
     sign.addSignature(ed.signOrEncrypt.jose as any).setProtectedHeader({ alg: "EdDSA" })
     const theirs = await sign.sign()
-    for (const k of [hs, es, ed]) await run(JsonWebSignature.verifyGeneral(theirs as any, k.verifyOrDecrypt.jwk as any))
+    for (const k of [hs, es, ed]) await run(JsonWebSignature.verifyGeneral(theirs as any, k.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
   })
 })

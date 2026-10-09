@@ -12,7 +12,7 @@
 import * as jose from "jose"
 import { JsonWebEncryption, JsonWebKey, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
-import { run, runToken } from "../src/runtime.ts"
+import { run, runToken, anySignatureAlgorithm } from "../src/runtime.ts"
 import figureData from "./fixtures/rfc7520/figures.json" with { type: "json" }
 
 type Json = any
@@ -96,48 +96,48 @@ describe("RFC 7520 Section 4.1 RSA v1.5 Signature (RS256)", () => {
     expect(jws).toEqual(fig(14))
   })
   it("verifies Figure 13 (compact)", async () => {
-    const out = await run(JsonWebSignature.verifyCompact(compact, rsaPublic))
+    const out = await run(JsonWebSignature.verifyCompact(compact, rsaPublic, { algorithms: anySignatureAlgorithm }))
     expect(utf8(out.payload)).toBe(payloadText)
     expect(out.protectedHeader).toEqual(header)
   })
   it("verifies Figure 14 (general) and Figure 15 (flattened)", async () => {
-    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(14), rsaPublic))).payload)).toBe(payloadText)
-    expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(15), rsaPublic))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(14), rsaPublic, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(15), rsaPublic, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
   })
 })
 
 describe("RFC 7520 Section 4.2 RSA-PSS Signature (PS384)", () => {
   // RSASSA-PSS is randomized: only verify the RFC outputs.
   it("verifies Figure 20 (compact)", async () => {
-    const out = await run(JsonWebSignature.verifyCompact(fig(20), rsaPublic))
+    const out = await run(JsonWebSignature.verifyCompact(fig(20), rsaPublic, { algorithms: anySignatureAlgorithm }))
     expect(utf8(out.payload)).toBe(payloadText)
     expect(out.protectedHeader).toEqual(fig(16))
   })
   it("verifies Figure 21 (general) and Figure 22 (flattened)", async () => {
-    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(21), rsaPublic))).payload)).toBe(payloadText)
-    expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(22), rsaPublic))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(21), rsaPublic, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(22), rsaPublic, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
   })
   it("a freshly produced PS384 signature verifies", async () => {
     const jws = await runToken(JsonWebSignature.signCompact(payloadText, { key: rsaPrivate, protectedHeader: fig(16) }))
     expect(jws.split(".").slice(0, 2).join(".")).toBe((fig(20) as string).split(".").slice(0, 2).join("."))
-    expect(utf8((await run(JsonWebSignature.verifyCompact(jws, rsaPublic))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyCompact(jws, rsaPublic, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
   })
 })
 
 describe("RFC 7520 Section 4.3 ECDSA Signature (ES512)", () => {
   // ECDSA is randomized: only verify the RFC outputs.
   it("verifies Figure 27 (compact)", async () => {
-    const out = await run(JsonWebSignature.verifyCompact(fig(27), ecPublic))
+    const out = await run(JsonWebSignature.verifyCompact(fig(27), ecPublic, { algorithms: anySignatureAlgorithm }))
     expect(utf8(out.payload)).toBe(payloadText)
     expect(out.protectedHeader).toEqual(fig(23))
   })
   it("verifies Figure 28 (general) and Figure 29 (flattened)", async () => {
-    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(28), ecPublic))).payload)).toBe(payloadText)
-    expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(29), ecPublic))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(28), ecPublic, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(29), ecPublic, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
   })
   it("a freshly produced ES512 signature verifies", async () => {
     const jws = await runToken(JsonWebSignature.signCompact(payloadText, { key: ecPrivate, protectedHeader: fig(23) }))
-    expect(utf8((await run(JsonWebSignature.verifyCompact(jws, ecPublic))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyCompact(jws, ecPublic, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
   })
 })
 
@@ -155,9 +155,9 @@ describe("RFC 7520 Section 4.4 HMAC-SHA2 Integrity Protection (HS256)", () => {
     )
   })
   it("verifies Figures 34, 35, 36", async () => {
-    expect(utf8((await run(JsonWebSignature.verifyCompact(fig(34), hmacKey))).payload)).toBe(payloadText)
-    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(35), hmacKey))).payload)).toBe(payloadText)
-    expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(36), hmacKey))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyCompact(fig(34), hmacKey, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(35), hmacKey, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(36), hmacKey, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
   })
 })
 
@@ -171,7 +171,7 @@ describe("RFC 7520 Section 4.5 Signature with Detached Content (HS256)", () => {
   it("verifies Figure 41 with the detached payload re-attached", async () => {
     const [protectedHeader, , signature] = compact.split(".")
     const out = await run(
-      JsonWebSignature.verifyFlattened({ protected: protectedHeader, payload: payloadB64, signature }, hmacKey)
+      JsonWebSignature.verifyFlattened({ protected: protectedHeader, payload: payloadB64, signature }, hmacKey, { algorithms: anySignatureAlgorithm })
     )
     expect(utf8(out.payload)).toBe(payloadText)
   })
@@ -181,14 +181,14 @@ describe("RFC 7520 Section 4.5 Signature with Detached Content (HS256)", () => {
     expect(general.payload).toBeUndefined()
     expect(flattened.payload).toBeUndefined()
     expect(
-      utf8((await run(JsonWebSignature.verifyGeneral({ ...general, payload: payloadB64 }, hmacKey))).payload)
+      utf8((await run(JsonWebSignature.verifyGeneral({ ...general, payload: payloadB64 }, hmacKey, { algorithms: anySignatureAlgorithm }))).payload)
     ).toBe(payloadText)
     expect(
-      utf8((await run(JsonWebSignature.verifyFlattened({ ...flattened, payload: payloadB64 }, hmacKey))).payload)
+      utf8((await run(JsonWebSignature.verifyFlattened({ ...flattened, payload: payloadB64 }, hmacKey, { algorithms: anySignatureAlgorithm }))).payload)
     ).toBe(payloadText)
   })
   it("a detached JWS does not verify without the payload", async () => {
-    const error = await failure(run(JsonWebSignature.verifyGeneral(fig(42), hmacKey)))
+    const error = await failure(run(JsonWebSignature.verifyGeneral(fig(42), hmacKey, { algorithms: anySignatureAlgorithm })))
     expect(error._tag).toBe("SignatureVerificationError")
   })
 })
@@ -202,11 +202,11 @@ describe("RFC 7520 Section 4.6 Protecting Specific Header Fields (HS256)", () =>
     expect(await run(JsonWebSignature.signGeneral(payloadText, [options]))).toEqual(fig(49))
   })
   it("verifies Figures 49 and 50", async () => {
-    const flat = await run(JsonWebSignature.verifyFlattened(fig(50), hmacKey))
+    const flat = await run(JsonWebSignature.verifyFlattened(fig(50), hmacKey, { algorithms: anySignatureAlgorithm }))
     expect(utf8(flat.payload)).toBe(payloadText)
     expect(flat.protectedHeader).toEqual(fig(44))
     expect(flat.unprotectedHeader).toEqual(fig(46))
-    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(49), hmacKey))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(49), hmacKey, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
   })
 })
 
@@ -219,11 +219,11 @@ describe("RFC 7520 Section 4.7 Protecting Content Only (HS256)", () => {
     expect(await run(JsonWebSignature.signGeneral(payloadText, [options]))).toEqual(fig(54))
   })
   it("verifies Figures 54 and 55", async () => {
-    const flat = await run(JsonWebSignature.verifyFlattened(fig(55), hmacKey))
+    const flat = await run(JsonWebSignature.verifyFlattened(fig(55), hmacKey, { algorithms: anySignatureAlgorithm }))
     expect(utf8(flat.payload)).toBe(payloadText)
     expect(flat.protectedHeader).toBeUndefined()
     expect(flat.unprotectedHeader).toEqual(fig(51))
-    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(54), hmacKey))).payload)).toBe(payloadText)
+    expect(utf8((await run(JsonWebSignature.verifyGeneral(fig(54), hmacKey, { algorithms: anySignatureAlgorithm }))).payload)).toBe(payloadText)
   })
 })
 
@@ -242,7 +242,7 @@ describe("RFC 7520 Section 4.8 Multiple Signatures", () => {
     // ES512 is randomized: check the header and that it verifies.
     expect(jws.signatures[1].header).toEqual(fig(62))
     expect(jws.signatures[1].protected).toBeUndefined()
-    const out = await run(JsonWebSignature.verifyFlattened({ ...jws.signatures[1], payload: jws.payload }, ecPublic))
+    const out = await run(JsonWebSignature.verifyFlattened({ ...jws.signatures[1], payload: jws.payload }, ecPublic, { algorithms: anySignatureAlgorithm }))
     expect(utf8(out.payload)).toBe(payloadText)
   })
   it("Figure 71 signatures match Figures 61, 65, 70", () => {
@@ -250,7 +250,7 @@ describe("RFC 7520 Section 4.8 Multiple Signatures", () => {
   })
   it("verifies Figure 71 with each of the three keys", async () => {
     for (const key of [rsaPublic, ecPublic, hmacKey]) {
-      const out = await run(JsonWebSignature.verifyGeneral(general, key))
+      const out = await run(JsonWebSignature.verifyGeneral(general, key, { algorithms: anySignatureAlgorithm }))
       expect(utf8(out.payload)).toBe(payloadText)
     }
   })
@@ -258,7 +258,7 @@ describe("RFC 7520 Section 4.8 Multiple Signatures", () => {
     const keys = [rsaPublic, ecPublic, hmacKey]
     for (let i = 0; i < 3; i++) {
       const out = await run(
-        JsonWebSignature.verifyFlattened({ ...general.signatures[i], payload: general.payload }, keys[i])
+        JsonWebSignature.verifyFlattened({ ...general.signatures[i], payload: general.payload }, keys[i], { algorithms: anySignatureAlgorithm })
       )
       expect(utf8(out.payload)).toBe(payloadText)
     }

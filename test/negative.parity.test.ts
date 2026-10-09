@@ -3,7 +3,7 @@ import { JsonWebEncryption, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run, runToken } from "../src/runtime.ts"
+import { run, runToken, anySignatureAlgorithm } from "../src/runtime.ts"
 
 const enc = new TextEncoder()
 const b64u = (s: string | Uint8Array) => jose.base64url.encode(s)
@@ -43,7 +43,11 @@ const compactCases: ReadonlyArray<readonly [string, (valid: string) => string]> 
 describe("JWS compact verification failures match jose", () => {
   it.each(compactCases)("%s", async (_, mutate) => {
     const token = mutate(await hs256())
-    await same(() => jose.compactVerify(token, secret), () => run(JsonWebSignature.verifyCompact(token, secret)))
+    // Both libraries get the same allow list of every supported algorithm.
+    await same(
+      () => jose.compactVerify(token, secret, { algorithms: [...anySignatureAlgorithm] }),
+      () => run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm }))
+    )
   })
 
   it("alg allow list rejects with ERR_JOSE_ALG_NOT_ALLOWED", async () => {
@@ -58,10 +62,14 @@ describe("JWS compact verification failures match jose", () => {
   it("custom crit extension accepted only when recognized", async () => {
     const header = { alg: "HS256", crit: ["urn:x"], "urn:x": 1 }
     const token = await new jose.CompactSign(payload).setProtectedHeader(header).sign(secret, { crit: { "urn:x": true } })
-    await same(() => jose.compactVerify(token, secret), () => run(JsonWebSignature.verifyCompact(token, secret)))
+    // Both libraries get the same allow list of every supported algorithm.
+    await same(
+      () => jose.compactVerify(token, secret, { algorithms: [...anySignatureAlgorithm] }),
+      () => run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm }))
+    )
     const ok = await same(
       () => jose.compactVerify(token, secret, { crit: { "urn:x": true } }),
-      () => run(JsonWebSignature.verifyCompact(token, secret, { crit: { "urn:x": true } }))
+      () => run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm, crit: { "urn:x": true } }))
     )
     expect(ok).toEqual({ ok: true })
   })
@@ -91,7 +99,7 @@ describe("key misuse matches jose", () => {
     const token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.signOrEncrypt.jose as any)
     await same(
       () => jose.compactVerify(token, keys.signOrEncrypt.jwk as any),
-      () => run(JsonWebSignature.verifyCompact(token, keys.signOrEncrypt.jwk as any))
+      () => run(JsonWebSignature.verifyCompact(token, keys.signOrEncrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
     )
   })
 
@@ -100,19 +108,19 @@ describe("key misuse matches jose", () => {
     const token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.signOrEncrypt.jose as any)
     const pub = keys.verifyOrDecrypt.jwk as jose.JWK
     for (const jwk of [{ ...pub, alg: "ES384" }, { ...pub, use: "enc" }, { ...pub, key_ops: ["encrypt"] }, { ...pub, alg: "ES256", use: "sig", key_ops: ["verify"] }]) {
-      await same(() => jose.compactVerify(token, jwk), () => run(JsonWebSignature.verifyCompact(token, jwk as any)))
+      await same(() => jose.compactVerify(token, jwk), () => run(JsonWebSignature.verifyCompact(token, jwk as any, { algorithms: anySignatureAlgorithm })))
     }
   })
 
   it("key type confusion: HMAC secret where ES256 expected; EC key with HS256 header", async () => {
     const keys = await keysFor("ES256")
     const esToken = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.signOrEncrypt.jose as any)
-    await same(() => jose.compactVerify(esToken, secret), () => run(JsonWebSignature.verifyCompact(esToken, secret)))
+    await same(() => jose.compactVerify(esToken, secret), () => run(JsonWebSignature.verifyCompact(esToken, secret, { algorithms: anySignatureAlgorithm })))
     // Classic algorithm-confusion attack: an HS256 token "signed" with the public key's bytes.
     const forged = await new jose.CompactSign(payload).setProtectedHeader({ alg: "HS256" }).sign(enc.encode(JSON.stringify(keys.verifyOrDecrypt.jwk)))
     const outcome = await same(
       () => jose.compactVerify(forged, keys.verifyOrDecrypt.jwk as any),
-      () => run(JsonWebSignature.verifyCompact(forged, keys.verifyOrDecrypt.jwk as any))
+      () => run(JsonWebSignature.verifyCompact(forged, keys.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
     )
     expect(outcome.ok).toBe(false)
   })

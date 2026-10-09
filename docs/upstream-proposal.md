@@ -142,6 +142,9 @@ defect.
   by providing a different `HttpClient`.
 - **Several matching keys** fail with `MultipleMatchingKeysError` unless the
   caller explicitly chooses `multipleMatches: "tryEach"`.
+- **Freshness:** a response's `Cache-Control: max-age` shortens freshness,
+  capped by `cacheMaxAge`. The resolver has an explicit `refresh` Effect for
+  warming the cache at startup or refreshing on a schedule.
 - **Persistence across restarts:** `storage: "keyValueStore"` persists fetched
   sets in `KeyValueStore`, for example for serverless cold starts. Choosing it
   adds `KeyValueStore` to the requirements at the type level; the default,
@@ -157,6 +160,11 @@ requirement.
 ## Security posture
 
 - **No `alg: none`:** the `none` algorithm is never accepted.
+- **Explicit algorithms:** verification requires an `algorithms` list unless the
+  key is a `Crypto.Key`, which is already bound to one algorithm (RFC 8725
+  section 3.1). This is enforced in the types.
+- **Expiry required:** JWTs must carry `exp`, on both issue and verification,
+  unless `requireExpiration: false` opts out.
 - **Algorithm pinning:** the token's `alg` must match the key's type, curve, and
   size, and callers can restrict accepted algorithms. Algorithm-confusion attacks
   (for example an HMAC token "signed" with a public key) are tested.

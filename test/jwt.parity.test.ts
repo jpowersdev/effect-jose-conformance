@@ -6,7 +6,7 @@ import { JsonWebToken } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run, runToken } from "../src/runtime.ts"
+import { run, runToken, anySignatureAlgorithm } from "../src/runtime.ts"
 
 const NOW = 1_700_000_000 // seconds
 const currentDate = new Date(NOW * 1000)
@@ -80,8 +80,7 @@ describe("JWT claim validation parity with jose", () => {
       ...(options.clockToleranceSeconds !== undefined ? { clockTolerance: options.clockToleranceSeconds } : {}),
       ...(options.maxTokenAgeSeconds !== undefined ? { maxTokenAge: options.maxTokenAgeSeconds } : {})
     }))
-    const effectOutcome = await settle(run(JsonWebToken.verify(token, secret, {
-      currentDate,
+    const effectOutcome = await settle(run(JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, currentDate,
       ...(options.issuer !== undefined ? { issuer: options.issuer } : {}),
       ...(options.subject !== undefined ? { subject: options.subject } : {}),
       ...(options.audience !== undefined ? { audience: options.audience } : {}),
@@ -104,7 +103,7 @@ describe("JWT claim validation parity with jose", () => {
       }
       let effectClaim: unknown
       try {
-        await run(JsonWebToken.verify(token, secret, { currentDate, ...(options.issuer ? { issuer: options.issuer } : {}) }))
+        await run(JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, currentDate, ...(options.issuer ? { issuer: options.issuer } : {}) }))
       } catch (e) {
         effectClaim = (e as { claim?: unknown }).claim
       }
@@ -161,7 +160,7 @@ describe("JWT issuance interop", () => {
     const at = (seconds: number) =>
       settle(run(Effect.gen(function*() {
         yield* TestClock.setTime(seconds * 1000)
-        return yield* JsonWebToken.verify(token, secret)
+        return yield* JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false })
       }).pipe(Effect.provide(TestClock.layer()))))
     expect(await at(NOW)).toEqual({ ok: true })
     expect(await at(NOW + 10)).toEqual({ ok: false, code: "ERR_JWT_EXPIRED" })
@@ -170,10 +169,10 @@ describe("JWT issuance interop", () => {
   it("decodes claims with a Schema", async () => {
     const token = await signWithJose({ sub: "u1", role: "admin" })
     const Claims = Schema.Struct({ ...JsonWebToken.RegisteredClaims.fields, role: Schema.Literals(["admin", "user"]) })
-    const { payload } = await run(JsonWebToken.verify(token, secret, { schema: Claims, algorithms: ["HS256"] }))
+    const { payload } = await run(JsonWebToken.verify(token, secret, { requireExpiration: false, schema: Claims, algorithms: ["HS256"] }))
     expect(payload.role).toBe("admin")
     const bad = await signWithJose({ role: "root" })
-    const outcome = await settle(run(JsonWebToken.verify(bad, secret, { schema: Claims })))
+    const outcome = await settle(run(JsonWebToken.verify(bad, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, schema: Claims })))
     expect(outcome).toEqual({ ok: false, code: "ERR_JWT_CLAIM_VALIDATION_FAILED" })
   })
 })
@@ -196,7 +195,7 @@ describe("encrypted JWT interop", () => {
       alg: "ECDH-ES+A256KW",
       enc: "A256GCM"
     }).setIssuer("urn:iss").replicateIssuerAsHeader().encrypt(keys.signOrEncrypt.jose as any)
-    const ours = await run(JsonWebToken.decrypt(joseToken, keys.verifyOrDecrypt.jwk as any, { issuer: "urn:iss" }))
+    const ours = await run(JsonWebToken.decrypt(joseToken, keys.verifyOrDecrypt.jwk as any, { issuer: "urn:iss", requireExpiration: false }))
     expect(ours.payload.role).toBe("user")
   })
 })
