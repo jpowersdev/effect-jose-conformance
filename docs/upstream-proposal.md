@@ -3,6 +3,9 @@
 **Status:** draft for discussion with the Effect maintainers. Nothing has been
 opened upstream yet.
 
+- **Implementation:** [`jose` branch of jpowersdev/effect](https://github.com/jpowersdev/effect/tree/jose)
+- **Conformance tests:** [jpowersdev/effect-jose-conformance](https://github.com/jpowersdev/effect-jose-conformance)
+
 ## Summary
 
 Add dependency-free implementations of the JOSE specifications to `effect`,
@@ -166,8 +169,8 @@ requirement.
 - **Expiry required:** JWTs must carry `exp`, on both issue and verification,
   unless `requireExpiration: false` opts out.
 - **Algorithm pinning:** the token's `alg` must match the key's type, curve, and
-  size, and callers can restrict accepted algorithms. Algorithm-confusion attacks
-  (for example an HMAC token "signed" with a public key) are tested.
+  size. Algorithm-confusion attacks (for example an HMAC token "signed" with a
+  public key) are tested.
 - **RSA key size:** RSA keys must be 2048 bits or larger.
 - **`crit` handling:** critical header extensions must be declared as understood.
 - **PBES2 limits:** PBES2 must be explicitly allowed, and its iteration count is
@@ -192,8 +195,9 @@ A separate conformance repository pins the fork and tests it against
 - **Interoperability:** every JWS algorithm, and all 108 JWE key-management ×
   content-encryption pairs, round-trip with jose in both directions, in every
   serialization.
-- **Matching behaviour:** 33 JWT claim scenarios, plus tampered, malformed, and
-  hostile inputs, give the same outcome and error as jose.
+- **Matching behaviour:** under equivalent options, 33 JWT claim scenarios plus
+  tampered, malformed, and hostile inputs give the same outcome and error as jose.
+  Where the defaults differ on purpose, a dedicated test pins each difference.
 - **RFC 7520 worked examples:** reproduced byte for byte wherever the inputs
   are deterministic.
 - **Every runtime, through a Nix flake:** Node.js 22, 24, and 26, Deno, Bun,
@@ -205,9 +209,12 @@ A separate conformance repository pins the fork and tests it against
 
 ## Intentional differences from jose
 
-- **Stricter:**
+- **Stricter defaults:** an explicit `algorithms` list, a required `exp`, a
+  minimum HMAC key length, size limits, and the remote key set rules (see
+  Security posture). jose does none of these.
+- **Stricter parsing:**
   - duplicate `crit` values are rejected on verification
-  - non-canonical base64url is rejected
+  - padded or whitespace-containing base64url is rejected
   - an embedded `jwk` must be in the protected header
 - **Better typed:** a key of the wrong type or curve, malformed PEM, and
   algorithms the runtime cannot perform each get a specific error, where jose
@@ -239,6 +246,8 @@ Each fails with a specific error, and tests pin that behaviour.
 4. **Delivery:** is the PR plan below the preferred split?
 5. **Cross-runtime testing:** should the conformance suite (or part of it) live in
    the Effect repository, or stay external?
+6. **Bundle size:** not measured yet. The next step would be to measure the cost
+   of importing `effect/jose` with the repository's bundle tooling.
 
 ## Suggested PR plan
 
