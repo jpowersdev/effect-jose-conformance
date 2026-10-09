@@ -3,7 +3,8 @@ import { JsonWebEncryption } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { aes192Supported, usesAes192 } from "../src/capabilities.ts"
-import { tagged } from "../src/outcome.ts"
+import { settle, tagged } from "../src/outcome.ts"
+import vectors from "./fixtures/aes192-vectors.json" with { type: "json" }
 import { run } from "../src/runtime.ts"
 
 const keyManagement = [
@@ -39,11 +40,20 @@ describe.each(cases)("JWE %s + %s", (alg, enc) => {
       : new Uint8Array(Number(alg.slice(1, 4)) / 8)
     const ours = await tagged(run(JsonWebEncryption.encryptCompact(plaintext, { key: key as any, protectedHeader: { alg, enc } })))
     expect(ours).toBe("UnsupportedAlgorithmError")
-    const theirs = await new jose.CompactEncrypt(plaintext).setProtectedHeader({ alg, enc }).encrypt(key as any).then(
-      () => "ok",
-      () => "failed"
-    )
-    expect(theirs).toBe("failed")
+    // jose fails too, but with the runtime's raw exception rather than a jose error.
+    const theirs = await settle(new jose.CompactEncrypt(plaintext).setProtectedHeader({ alg, enc }).encrypt(key as any))
+    expect(theirs.ok).toBe(false)
+    expect(theirs.ok === false && theirs.code.startsWith("ERR_")).toBe(false)
+  })
+
+  it.runIf(usesAes192(alg, enc))("decrypting a token made elsewhere fails clearly where the runtime lacks 192-bit AES", async ({ skip }) => {
+    if (await aes192Supported) return skip("runtime supports 192-bit AES")
+    const vector = vectors[`${alg}+${enc}`]
+    const key = vector.key
+    const ours = await tagged(run(JsonWebEncryption.decryptCompact(vector.token, key as any, allow)))
+    expect(ours).toBe("UnsupportedAlgorithmError")
+    const theirs = await settle(jose.compactDecrypt(vector.token, key as any, allow))
+    expect(theirs.ok).toBe(false)
   })
 
   it("effect encrypts (compact) → jose decrypts", async ({ skip }) => {
