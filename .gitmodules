@@ -1,4 +1,4 @@
 [submodule "vendor/effect"]
 	path = vendor/effect
-	url = /Users/jonathan/github.com/effect-ts/effect
+	url = https://github.com/jpowersdev/effect.git
 	branch = jose

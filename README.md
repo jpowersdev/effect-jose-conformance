@@ -75,6 +75,5 @@ pnpm check       # tsc (TypeScript 7, matching the fork)
 pnpm fork:update # move the pin to the latest commit on the fork's jose branch
 ```
 
-The submodule currently points at a local checkout. Once the fork's `jose`
-branch is pushed, switch it with
-`git submodule set-url vendor/effect git@github.com:jpowersdev/effect.git`.
+The submodule tracks the `jose` branch of
+[jpowersdev/effect](https://github.com/jpowersdev/effect/tree/jose).
