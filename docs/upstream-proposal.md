@@ -101,7 +101,23 @@ const { payload } = yield* JsonWebToken.verify(token, keySet, {
   is how key sets plug in.
 - **Times** come from `Clock`, and durations are Effect `Duration` inputs.
 - **Typed claims:** passing a `schema` to `verify`/`decrypt` decodes the claims
-  and types the result.
+  and types the result. Passing one to `sign`/`encrypt` encodes typed claims
+  first.
+- **Secrets stay `Redacted`:** produced tokens are returned as `Redacted` values
+  with a branded type (for example `Redacted<JsonWebToken.Signed>`). Tokens,
+  secrets, and private JWKs may be passed in as `Redacted`, so a bearer token from
+  `HttpApiSecurity.bearer` can be verified directly. Private key export
+  (`exportPrivateJwk`, `exportPkcs8`) returns `Redacted` values, and schema errors
+  never echo the claims.
+- **Branded strings:** every formatted string the library produces is branded:
+  - tokens (`JsonWebSignature.Compact`, `JsonWebEncryption.Compact`,
+    `JsonWebToken.Signed`, `JsonWebToken.Encrypted`)
+  - thumbprints
+  - PEM
+  - base64url members (`Base64Url`)
+
+  Each brand has a schema for decoding values at a boundary. `alg` and `enc`
+  are typed as the supported algorithms only.
 
 ### Errors
 
@@ -151,6 +167,14 @@ requirement.
 - **No decryption oracle:** a failed key unwrap falls back to a random content
   key, so failures don't reveal which step failed (RFC 7516 section 11.5).
 - **Strict base64url:** padding and whitespace are rejected.
+- **HMAC key length:** HMAC keys must be at least as long as the hash (RFC 7518
+  section 3.2).
+- **Size limits:** compact tokens are capped at 64 KiB by default, before any
+  decoding.
+- **Remote key sets** must use HTTPS unless `allowInsecureHttp` is set. URLs with
+  credentials or a fragment are rejected, redirects are refused, and responses
+  are capped (128 KiB and 64 keys by default). These ideas come from community
+  work, notably `@yielded/jose`.
 
 ## Evidence
 

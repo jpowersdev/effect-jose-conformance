@@ -95,7 +95,7 @@ describe("remote key set storage", () => {
     )
     const ours = await jwksEndpoint(jwks)
     const coldStart = Effect.gen(function*() {
-      const resolver = yield* JsonWebKeySet.makeRemote(ours.url, { storage: "keyValueStore" })
+      const resolver = yield* JsonWebKeySet.makeRemote(ours.url, { storage: "keyValueStore", allowInsecureHttp: true })
       return yield* JsonWebSignature.verifyCompact(token, resolver)
     })
     await run(Effect.gen(function*() {

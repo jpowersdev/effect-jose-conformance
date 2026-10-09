@@ -6,7 +6,7 @@ import { JsonWebToken } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run } from "../src/runtime.ts"
+import { run, runToken } from "../src/runtime.ts"
 
 const NOW = 1_700_000_000 // seconds
 const currentDate = new Date(NOW * 1000)
@@ -117,7 +117,7 @@ describe("JWT issuance interop", () => {
   for (const alg of ["HS256", "RS256", "PS256", "ES256", "EdDSA"] as const) {
     it(`effect issues (${alg}) → jose verifies with identical claims`, async () => {
       const keys = await keysFor(alg)
-      const token = await run(
+      const token = await runToken(
         TestClock.setTime(NOW * 1000).pipe(Effect.andThen(JsonWebToken.sign({ role: "admin", nested: { a: [1, 2] } }, {
           key: keys.signOrEncrypt.jwk as any,
           protectedHeader: { alg, typ: "JWT" },
@@ -151,7 +151,7 @@ describe("JWT issuance interop", () => {
         notBefore: "-5 minutes"
       })
     }).pipe(Effect.provide(TestClock.layer()))
-    const token = await run(program)
+    const token = await runToken(program)
     const claims = jose.decodeJwt(token)
     expect(claims).toEqual({ iat: NOW, exp: NOW + 3600, nbf: NOW - 300 })
   })
@@ -181,7 +181,7 @@ describe("JWT issuance interop", () => {
 describe("encrypted JWT interop", () => {
   it("effect encrypts → jose decrypts, and back", async () => {
     const keys = await keysFor("ECDH-ES+A256KW")
-    const token = await run(JsonWebToken.encrypt({ role: "admin" }, {
+    const token = await runToken(JsonWebToken.encrypt({ role: "admin" }, {
       key: keys.signOrEncrypt.jwk as any,
       protectedHeader: { alg: "ECDH-ES+A256KW", enc: "A256GCM" },
       issuer: "urn:iss",

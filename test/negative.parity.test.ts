@@ -3,7 +3,7 @@ import { JsonWebEncryption, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run } from "../src/runtime.ts"
+import { run, runToken } from "../src/runtime.ts"
 
 const enc = new TextEncoder()
 const b64u = (s: string | Uint8Array) => jose.base64url.encode(s)
@@ -78,7 +78,7 @@ describe("key misuse matches jose", () => {
     const { key_ops: _, ext: __, alg: ___, ...privateJwk } = jwk as any
     await same(
       () => new jose.CompactSign(payload).setProtectedHeader({ alg: "RS256" }).sign(privateJwk),
-      () => run(JsonWebSignature.signCompact(payload, { key: privateJwk, protectedHeader: { alg: "RS256" } }))
+      () => runToken(JsonWebSignature.signCompact(payload, { key: privateJwk, protectedHeader: { alg: "RS256" } }))
     )
   })
 
@@ -86,7 +86,7 @@ describe("key misuse matches jose", () => {
     const keys = await keysFor("ES256")
     await same(
       () => new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.verifyOrDecrypt.jwk as any),
-      () => run(JsonWebSignature.signCompact(payload, { key: keys.verifyOrDecrypt.jwk as any, protectedHeader: { alg: "ES256" } }))
+      () => runToken(JsonWebSignature.signCompact(payload, { key: keys.verifyOrDecrypt.jwk as any, protectedHeader: { alg: "ES256" } }))
     )
     const token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.signOrEncrypt.jose as any)
     await same(
@@ -152,7 +152,7 @@ describe("JWE decryption failures match jose", () => {
     const token = await new jose.CompactEncrypt(payload).setProtectedHeader({ alg: "PBES2-HS256+A128KW", enc: "A128GCM" })
       .setKeyManagementParameters({ p2c: 20_000 }).encrypt(password)
     await same(() => jose.compactDecrypt(token, password), () => run(JsonWebEncryption.decryptCompact(token, password)))
-    const allow = { keyManagementAlgorithms: ["PBES2-HS256+A128KW"] }
+    const allow = { keyManagementAlgorithms: ["PBES2-HS256+A128KW" as const] }
     await same(() => jose.compactDecrypt(token, password, allow), () => run(JsonWebEncryption.decryptCompact(token, password, allow)))
     const raised = { ...allow, maxPBES2Count: 30_000 }
     const ok = await same(() => jose.compactDecrypt(token, password, raised), () => run(JsonWebEncryption.decryptCompact(token, password, raised)))
@@ -172,7 +172,7 @@ describe("JWE decryption failures match jose", () => {
 
   it("enc allow list rejects", async () => {
     const { kek, token } = await encryptA256KW()
-    const opts = { contentEncryptionAlgorithms: ["A128GCM"] }
+    const opts = { contentEncryptionAlgorithms: ["A128GCM" as const] }
     await same(() => jose.compactDecrypt(token, kek, opts), () => run(JsonWebEncryption.decryptCompact(token, kek, opts)))
   })
 

@@ -12,7 +12,7 @@
 import * as jose from "jose"
 import { JsonWebEncryption, JsonWebKey, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
-import { run } from "../src/runtime.ts"
+import { run, runToken } from "../src/runtime.ts"
 import figureData from "./fixtures/rfc7520/figures.json" with { type: "json" }
 
 type Json = any
@@ -38,7 +38,7 @@ const publicJwk = (jwk: Json): Json => {
  * JWK directly as `keyManagementParameters.epk` also works (see the
  * regression tests below); both paths are exercised.
  */
-const ephemeralKey = (jwk: Json, alg: string) => run(JsonWebKey.importJwk(jwk, alg, { extractable: true })) as Promise<Json>
+const ephemeralKey = (jwk: Json, alg: string) => run(JsonWebKey.importJwk(jwk, alg as any, { extractable: true })) as Promise<Json>
 
 /** Resolves with the tagged error a failing effect produced. */
 const failure = async (promise: Promise<unknown>): Promise<Json> => {
@@ -84,7 +84,7 @@ describe("RFC 7520 Section 4.1 RSA v1.5 Signature (RS256)", () => {
     expect(jose.base64url.encode(JSON.stringify(header))).toBe(compact.split(".")[0])
   })
   it("signCompact produces Figure 13 exactly", async () => {
-    const jws = await run(JsonWebSignature.signCompact(payloadText, { key: rsaPrivate, protectedHeader: header }))
+    const jws = await runToken(JsonWebSignature.signCompact(payloadText, { key: rsaPrivate, protectedHeader: header }))
     expect(jws).toBe(compact)
   })
   it("signFlattened produces Figure 15 exactly", async () => {
@@ -118,7 +118,7 @@ describe("RFC 7520 Section 4.2 RSA-PSS Signature (PS384)", () => {
     expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(22), rsaPublic))).payload)).toBe(payloadText)
   })
   it("a freshly produced PS384 signature verifies", async () => {
-    const jws = await run(JsonWebSignature.signCompact(payloadText, { key: rsaPrivate, protectedHeader: fig(16) }))
+    const jws = await runToken(JsonWebSignature.signCompact(payloadText, { key: rsaPrivate, protectedHeader: fig(16) }))
     expect(jws.split(".").slice(0, 2).join(".")).toBe((fig(20) as string).split(".").slice(0, 2).join("."))
     expect(utf8((await run(JsonWebSignature.verifyCompact(jws, rsaPublic))).payload)).toBe(payloadText)
   })
@@ -136,7 +136,7 @@ describe("RFC 7520 Section 4.3 ECDSA Signature (ES512)", () => {
     expect(utf8((await run(JsonWebSignature.verifyFlattened(fig(29), ecPublic))).payload)).toBe(payloadText)
   })
   it("a freshly produced ES512 signature verifies", async () => {
-    const jws = await run(JsonWebSignature.signCompact(payloadText, { key: ecPrivate, protectedHeader: fig(23) }))
+    const jws = await runToken(JsonWebSignature.signCompact(payloadText, { key: ecPrivate, protectedHeader: fig(23) }))
     expect(utf8((await run(JsonWebSignature.verifyCompact(jws, ecPublic))).payload)).toBe(payloadText)
   })
 })
@@ -144,7 +144,7 @@ describe("RFC 7520 Section 4.3 ECDSA Signature (ES512)", () => {
 describe("RFC 7520 Section 4.4 HMAC-SHA2 Integrity Protection (HS256)", () => {
   const header = fig(30)
   it("signCompact produces Figure 34 exactly", async () => {
-    expect(await run(JsonWebSignature.signCompact(payloadText, { key: hmacKey, protectedHeader: header }))).toBe(fig(34))
+    expect(await runToken(JsonWebSignature.signCompact(payloadText, { key: hmacKey, protectedHeader: header }))).toBe(fig(34))
   })
   it("signGeneral / signFlattened produce Figures 35 / 36 exactly", async () => {
     expect(await run(JsonWebSignature.signGeneral(payloadText, [{ key: hmacKey, protectedHeader: header }]))).toEqual(
@@ -164,7 +164,7 @@ describe("RFC 7520 Section 4.4 HMAC-SHA2 Integrity Protection (HS256)", () => {
 describe("RFC 7520 Section 4.5 Signature with Detached Content (HS256)", () => {
   const compact: string = fig(41) // header..signature
   it("Figure 41 matches the attached signature with the payload removed", async () => {
-    const jws = await run(JsonWebSignature.signCompact(payloadText, { key: hmacKey, protectedHeader: fig(37) }))
+    const jws = await runToken(JsonWebSignature.signCompact(payloadText, { key: hmacKey, protectedHeader: fig(37) }))
     const [h, , s] = jws.split(".")
     expect(`${h}..${s}`).toBe(compact)
   })
@@ -306,7 +306,7 @@ describe("RFC 7520 Section 5.2 Key Encryption Using RSA-OAEP with AES-GCM", () =
     expect(utf8((await run(JsonWebEncryption.decryptFlattened(fig(94), key))).plaintext)).toBe(plaintext)
   })
   it("a fresh RSA-OAEP encryption with the RFC CEK/IV decrypts and reproduces the content", async () => {
-    const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key: publicJwk(key),
       protectedHeader: fig(88),
       cek: b64(fig(85)),
@@ -327,7 +327,7 @@ describe("RFC 7520 Section 5.3 Key Wrap Using PBES2-AES-KeyWrap with AES-CBC-HMA
   const password = encodeUtf8(fig(96))
   // The plaintext is the Figure 95 JWK Set with all whitespace removed.
   const jwkSet = JSON.stringify(fig(95))
-  const options = { keyManagementAlgorithms: ["PBES2-HS512+A256KW"] }
+  const options = { keyManagementAlgorithms: ["PBES2-HS512+A256KW"] } as const
   const kmp = { p2s: b64(fig(99)), p2c: fig(101).p2c as number }
 
   it("PBES2 is rejected unless explicitly allowed", async () => {
@@ -345,7 +345,7 @@ describe("RFC 7520 Section 5.3 Key Wrap Using PBES2-AES-KeyWrap with AES-CBC-HMA
   })
   it("encryptCompact with the RFC p2s/p2c/CEK reproduces the Figure 100 encrypted key and round-trips", async () => {
     const { alg, cty, enc } = fig(101)
-    const jwe = await run(JsonWebEncryption.encryptCompact(jwkSet, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(jwkSet, {
       key: password,
       protectedHeader: { alg, cty, enc },
       cek: b64(fig(97)),
@@ -364,7 +364,7 @@ describe("RFC 7520 Section 5.3 Key Wrap Using PBES2-AES-KeyWrap with AES-CBC-HMA
   it("encryptCompact reproduces Figure 105 exactly when the header lists p2s/p2c in RFC order", async () => {
     // p2s/p2c are given in the protected header in the RFC's position; the
     // implementation overwrites them in place with the values it uses.
-    const jwe = await run(JsonWebEncryption.encryptCompact(jwkSet, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(jwkSet, {
       key: password,
       protectedHeader: fig(101),
       cek: b64(fig(97)),
@@ -389,7 +389,7 @@ describe("RFC 7520 Section 5.4 Key Agreement with Key Wrapping Using ECDH-ES and
   })
   it("encryptCompact with the RFC ephemeral key/CEK/IV reproduces the Figure 112 encrypted key and round-trips", async () => {
     const { alg, kid, enc } = fig(113)
-    const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key: publicJwk(key),
       protectedHeader: { alg, kid, enc },
       cek: b64(fig(109)),
@@ -410,7 +410,7 @@ describe("RFC 7520 Section 5.4 Key Agreement with Key Wrapping Using ECDH-ES and
   // then exported to build the "epk" header, which failed.
   it("accepts the Figure 111 private JWK directly as keyManagementParameters.epk", async () => {
     const { alg, kid, enc } = fig(113)
-    const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key: publicJwk(key),
       protectedHeader: { alg, kid, enc },
       cek: b64(fig(109)),
@@ -437,7 +437,7 @@ describe("RFC 7520 Section 5.5 Key Agreement Using ECDH-ES with AES-CBC-HMAC-SHA
   })
   it("encryptCompact with the RFC ephemeral key/IV round-trips", async () => {
     const { alg, kid, enc } = fig(124)
-    const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key: publicJwk(key),
       protectedHeader: { alg, kid, enc },
       iv: b64(fig(121)),
@@ -454,7 +454,7 @@ describe("RFC 7520 Section 5.5 Key Agreement Using ECDH-ES with AES-CBC-HMAC-SHA
   // Regression: same as in 5.4 (private JWK epk).
   it("accepts the Figure 122 private JWK directly as keyManagementParameters.epk", async () => {
     const { alg, kid, enc } = fig(124)
-    const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key: publicJwk(key),
       protectedHeader: { alg, kid, enc },
       iv: b64(fig(121)),
@@ -467,7 +467,7 @@ describe("RFC 7520 Section 5.5 Key Agreement Using ECDH-ES with AES-CBC-HMAC-SHA
 describe("RFC 7520 Section 5.6 Direct Encryption Using AES-GCM", () => {
   const key = fig(130)
   it("encryptCompact produces Figure 136 exactly", async () => {
-    const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key,
       protectedHeader: fig(132),
       iv: b64(fig(131))
@@ -506,7 +506,7 @@ describe("RFC 7520 Section 5.7 Key Wrap Using AES-GCM KeyWrap with AES-CBC-HMAC-
   })
   it("encryptCompact with the RFC CEK/IV/key-wrap IV reproduces the Figure 142 encrypted key and Figure 143 tag", async () => {
     const { alg, kid, enc } = fig(144)
-    const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key,
       protectedHeader: { alg, kid, enc },
       cek: b64(fig(139)),
@@ -523,7 +523,7 @@ describe("RFC 7520 Section 5.7 Key Wrap Using AES-GCM KeyWrap with AES-CBC-HMAC-
   it("encryptCompact reproduces Figure 148 exactly when the header lists tag/iv in RFC order", async () => {
     // "tag" and "iv" are given in the protected header in the RFC's position;
     // the implementation overwrites them in place with the values it computes.
-    const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
+    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key,
       protectedHeader: fig(144),
       cek: b64(fig(139)),
@@ -538,7 +538,7 @@ describe("RFC 7520 Section 5.8 Key Wrap Using AES-KeyWrap with AES-GCM", () => {
   const key = fig(151)
   const options = { key, protectedHeader: fig(155), cek: b64(fig(152)), iv: b64(fig(153)) }
   it("encryptCompact produces Figure 159 exactly", async () => {
-    expect(await run(JsonWebEncryption.encryptCompact(plaintext, options))).toBe(fig(159))
+    expect(await runToken(JsonWebEncryption.encryptCompact(plaintext, options))).toBe(fig(159))
   })
   it("encryptFlattened produces Figure 161 exactly", async () => {
     expect(await run(JsonWebEncryption.encryptFlattened(plaintext, options))).toEqual(fig(161))
@@ -572,7 +572,7 @@ describe("RFC 7520 Section 5.9 Compressed Content", () => {
     expect(["UnsupportedJweHeaderError", "DecryptionError"]).toContain(general._tag)
   })
   it("encrypting with \"zip\" fails with UnsupportedAlgorithmError", async () => {
-    const error = await failure(run(JsonWebEncryption.encryptCompact(plaintext, {
+    const error = await failure(runToken(JsonWebEncryption.encryptCompact(plaintext, {
       key,
       protectedHeader: fig(166),
       cek: b64(fig(163)),

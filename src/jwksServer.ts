@@ -7,6 +7,8 @@
  * - `PUT  /:id/jwks`  sets the key set served at `GET /:id/jwks`
  * - `GET  /:id/count` returns how many times `GET /:id/jwks` was requested
  * - `GET  /:id/fail`  always responds with 500
+ * - `GET  /:id/redirect` redirects to `/:id/jwks`
+ * - `GET  /:id/big`   serves the key set padded beyond 128 KiB
  */
 import { createServer } from "node:http"
 import type { TestProject } from "vitest/node"
@@ -27,6 +29,13 @@ export default async function setup(project: TestProject) {
     if (req.method === "OPTIONS") return void res.writeHead(204).end()
     const [, id, action] = (req.url ?? "").split("/")
     if (action === "fail") return void res.writeHead(500).end()
+    if (action === "redirect") return void res.writeHead(302, { location: `/${id}/jwks` }).end()
+    if (action === "big") {
+      const body = JSON.parse(bodies.get(id) ?? '{"keys":[]}')
+      return void res.writeHead(200, { "content-type": "application/json" }).end(
+        JSON.stringify({ ...body, padding: "x".repeat(200_000) })
+      )
+    }
     if (action === "count") {
       return void res.writeHead(200, { "content-type": "application/json" }).end(String(counts.get(id) ?? 0))
     }

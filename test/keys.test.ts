@@ -1,9 +1,10 @@
+import * as Redacted from "effect/Redacted"
 import * as jose from "jose"
 import { JsonWebKey, JsonWebSignature, JsonWebEncryption } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run } from "../src/runtime.ts"
+import { run, runToken } from "../src/runtime.ts"
 
 const payload = new TextEncoder().encode("payload")
 
@@ -50,12 +51,12 @@ describe("PEM import and export interoperate with jose", () => {
     expect(pub.type).toBe("public")
     expect(priv.type).toBe("private")
     expect(await run(JsonWebKey.exportSpki(pub))).toBe(spki)
-    expect(await run(JsonWebKey.exportPkcs8(priv))).toBe(pkcs8)
+    expect(Redacted.value(await run(JsonWebKey.exportPkcs8(priv)))).toBe(pkcs8)
     if (alg === "RSA-OAEP-256" || alg === "ECDH-ES") {
-      const jwe = await run(JsonWebEncryption.encryptCompact(payload, { key: pub, protectedHeader: { alg, enc: "A128GCM" } }))
-      await jose.compactDecrypt(jwe, await jose.importPKCS8(await run(JsonWebKey.exportPkcs8(priv)), alg))
+      const jwe = await runToken(JsonWebEncryption.encryptCompact(payload, { key: pub, protectedHeader: { alg, enc: "A128GCM" } }))
+      await jose.compactDecrypt(jwe, await jose.importPKCS8(Redacted.value(await run(JsonWebKey.exportPkcs8(priv))), alg))
     } else {
-      const jws = await run(JsonWebSignature.signCompact(payload, { key: priv, protectedHeader: { alg } }))
+      const jws = await runToken(JsonWebSignature.signCompact(payload, { key: priv, protectedHeader: { alg } }))
       await jose.compactVerify(jws, await jose.importSPKI(await run(JsonWebKey.exportSpki(pub)), alg))
     }
   })
@@ -73,7 +74,7 @@ describe("key generation produces keys jose accepts", () => {
   const pairs = ["RS256", "PS512", "ES256", "ES384", "ES512", "EdDSA", "Ed25519"] as const
   it.each(pairs)("generateKeyPair(%s) signs tokens jose verifies", async (alg) => {
     const { privateKey, publicKey } = await run(JsonWebKey.generateKeyPair(alg, { extractable: true }))
-    const jws = await run(JsonWebSignature.signCompact(payload, { key: privateKey, protectedHeader: { alg } }))
+    const jws = await runToken(JsonWebSignature.signCompact(payload, { key: privateKey, protectedHeader: { alg } }))
     const jwk = await run(JsonWebKey.exportJwk(publicKey))
     await jose.compactVerify(jws, jwk as jose.JWK)
     expect(privateKey.extractable).toBe(true)
@@ -95,7 +96,7 @@ describe("key generation produces keys jose accepts", () => {
   it.each(secrets)("generateSecret(%s) has the size jose expects", async (alg) => {
     const ours = await run(JsonWebKey.generateSecret(alg, { extractable: true }))
     const theirs = await jose.generateSecret(alg, { extractable: true })
-    const ourBytes = ours instanceof Uint8Array ? ours : await run(JsonWebKey.exportJwk(ours)).then((j) => jose.base64url.decode(j.k as string))
+    const ourBytes = ours instanceof Uint8Array ? ours : await run(JsonWebKey.exportPrivateJwk(ours)).then((j) => jose.base64url.decode(Redacted.value(j).k as string))
     const theirBytes = theirs instanceof Uint8Array ? theirs : jose.base64url.decode((await jose.exportJWK(theirs)).k!)
     expect(ourBytes.length).toBe(theirBytes.length)
     expect(ours instanceof Uint8Array).toBe(theirs instanceof Uint8Array)

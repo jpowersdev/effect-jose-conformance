@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Cause from "effect/Cause"
 import * as Layer from "effect/Layer"
+import * as Redacted from "effect/Redacted"
 
 const randomBytes = (size: number): Uint8Array => {
   const bytes = new Uint8Array(size)
@@ -28,3 +29,7 @@ export const run = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Promise<A
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
+
+/** Runs an effect producing a `Redacted` token and returns the token text, for handing to jose. */
+export const runToken = <E>(effect: Effect.Effect<Redacted.Redacted<string>, E, Crypto.Crypto>): Promise<string> =>
+  run(effect).then(Redacted.value)

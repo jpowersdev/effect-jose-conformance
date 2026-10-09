@@ -2,7 +2,7 @@ import * as jose from "jose"
 import { JsonWebKey, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
-import { run } from "../src/runtime.ts"
+import { run, runToken } from "../src/runtime.ts"
 
 const algorithms = [
   "HS256", "HS384", "HS512",
@@ -18,7 +18,7 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 describe.each(algorithms)("JWS %s", (alg) => {
   it("effect signs (compact) → jose verifies", async () => {
     const keys = await keysFor(alg)
-    const jws = await run(JsonWebSignature.signCompact(payload, {
+    const jws = await runToken(JsonWebSignature.signCompact(payload, {
       key: keys.signOrEncrypt.jwk as any,
       protectedHeader: { alg, kid: "k1" }
     }))
@@ -42,7 +42,7 @@ describe.each(algorithms)("JWS %s", (alg) => {
     const key = keys.signOrEncrypt.jwk instanceof Uint8Array
       ? keys.signOrEncrypt.jwk
       : await run(JsonWebKey.importJwk(keys.signOrEncrypt.jwk as any, alg))
-    const jws = await run(JsonWebSignature.signCompact(payload, { key, protectedHeader: { alg } }))
+    const jws = await runToken(JsonWebSignature.signCompact(payload, { key, protectedHeader: { alg } }))
     await jose.compactVerify(jws, keys.verifyOrDecrypt.jose as any)
   })
 

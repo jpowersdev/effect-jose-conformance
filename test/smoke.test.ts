@@ -1,13 +1,13 @@
 import * as jose from "jose"
 import { JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
-import { run } from "../src/runtime.ts"
+import { run, runToken } from "../src/runtime.ts"
 
 const secret = new TextEncoder().encode("a-string-secret-at-least-256-bits-long")
 
 describe("smoke", () => {
   it("effect signs, jose verifies (HS256)", async () => {
-    const jws = await run(JsonWebSignature.signCompact("hello", { key: secret, protectedHeader: { alg: "HS256" } }))
+    const jws = await runToken(JsonWebSignature.signCompact("hello", { key: secret, protectedHeader: { alg: "HS256" } }))
     const out = await jose.compactVerify(jws, secret)
     expect(new TextDecoder().decode(out.payload)).toBe("hello")
   })

@@ -92,6 +92,7 @@ describe("remote JWKS", () => {
 
     const program = Effect.gen(function*() {
       const resolver = yield* JsonWebKeySet.makeRemote(endpoint.url, {
+        allowInsecureHttp: true, // the shared test server is plain HTTP
         cooldownDuration: "30 seconds",
         cacheMaxAge: "10 minutes"
       })
@@ -128,7 +129,7 @@ describe("remote JWKS", () => {
     const endpoint = await jwksEndpoint()
     const tokenA = await signed(a, { alg: "ES256", kid: "a" })
     const outcome = await settle(run(Effect.gen(function*() {
-      const resolver = yield* JsonWebKeySet.makeRemote(endpoint.failUrl)
+      const resolver = yield* JsonWebKeySet.makeRemote(endpoint.failUrl, { allowInsecureHttp: true })
       return yield* JsonWebSignature.verifyCompact(tokenA, resolver)
     }).pipe(Effect.provide(FetchHttpClient.layer))))
     expect(outcome).toEqual({ ok: false, code: "ERR_JOSE_GENERIC" })

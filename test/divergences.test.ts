@@ -5,8 +5,11 @@
  * library changes, the test fails and the difference must be re-evaluated.
  */
 import * as jose from "jose"
-import { JsonWebEncryption, JsonWebKey, JsonWebSignature, JsonWebToken } from "effect/jose"
-import { describe, expect, it } from "vitest"
+import * as Effect from "effect/Effect"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import { JsonWebEncryption, JsonWebKey, JsonWebKeySet, JsonWebSignature, JsonWebToken } from "effect/jose"
+import { jwksEndpoint } from "../src/jwksEndpoint.ts"
+import { beforeAll, describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle, tagged } from "../src/outcome.ts"
 import { run } from "../src/runtime.ts"
@@ -105,7 +108,7 @@ describe("unsupported on purpose", () => {
 
 describe("different conventions", () => {
   it("emits unencoded (b64:false) payloads attached in flattened JSON; jose detaches them", async () => {
-    const header = { alg: "HS256", b64: false, crit: ["b64"] }
+    const header = { alg: "HS256" as const, b64: false, crit: ["b64"] }
     const ours = await run(JsonWebSignature.signFlattened("$.02", { key: secret, protectedHeader: header }))
     const theirs = await new jose.FlattenedSign(enc.encode("$.02")).setProtectedHeader(header).sign(secret)
     expect(ours.payload).toBe("$.02")
@@ -124,6 +127,73 @@ describe("different conventions", () => {
     })
     expect(await settle(run(JsonWebToken.verify(token, secret, { currentDate: now, clockTolerance: "10 seconds" })))).toEqual({
       ok: true
+    })
+  })
+})
+
+describe("hardening jose does not do", () => {
+  it("requires HMAC keys at least as long as the hash (RFC 7518 section 3.2); jose accepts shorter ones", async () => {
+    const short = new Uint8Array(16)
+    const token = await new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "HS256" }).sign(short)
+    expect(await settle(jose.compactVerify(token, short))).toEqual({ ok: true })
+    expect(await tagged(run(JsonWebSignature.verifyCompact(token, short)))).toBe("InvalidKeyError")
+    expect(await tagged(run(JsonWebSignature.signCompact("x", { key: short, protectedHeader: { alg: "HS256" } })))).toBe(
+      "InvalidKeyError"
+    )
+  })
+
+  it("caps compact tokens at 64 KiB by default, adjustable with maxTokenLength; jose has no limit", async () => {
+    const token = await new jose.CompactSign(enc.encode("x".repeat(70_000))).setProtectedHeader({ alg: "HS256" }).sign(secret)
+    expect(await settle(jose.compactVerify(token, secret))).toEqual({ ok: true })
+    expect(await tagged(run(JsonWebSignature.verifyCompact(token, secret)))).toBe("JwsTooLargeError")
+    expect(await settle(run(JsonWebSignature.verifyCompact(token, secret, { maxTokenLength: 200_000 })))).toEqual({
+      ok: true
+    })
+  })
+
+  describe("remote key sets", () => {
+    const remote = (url: string, options?: JsonWebKeySet.RemoteOptions) =>
+      run(
+        Effect.flatMap(JsonWebKeySet.makeRemote(url, options), (resolver) =>
+          Effect.flatMap(
+            Effect.promise(() =>
+              new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "ES256", kid: "k" }).sign(signingKey)
+            ),
+            (token) => JsonWebSignature.verifyCompact(token, resolver)
+          )).pipe(Effect.provide(FetchHttpClient.layer))
+      )
+    let signingKey: CryptoKey
+    let publicJwk: jose.JWK
+
+    beforeAll(async () => {
+      const pair = await jose.generateKeyPair("ES256", { extractable: true })
+      signingKey = pair.privateKey
+      publicJwk = { ...(await jose.exportJWK(pair.publicKey)), kid: "k" }
+    })
+
+    it("require HTTPS unless allowInsecureHttp is set; jose fetches plain HTTP", async () => {
+      const endpoint = await jwksEndpoint({ keys: [publicJwk] })
+      expect(await tagged(remote(endpoint.url))).toBe("InvalidKeySetUrlError")
+      expect(await tagged(remote(endpoint.url, { allowInsecureHttp: true }))).toBe("Success")
+      const token = await new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "ES256", kid: "k" }).sign(signingKey)
+      expect(await settle(jose.compactVerify(token, jose.createRemoteJWKSet(new URL(endpoint.url))))).toEqual({ ok: true })
+    })
+
+    it("refuse redirects", async () => {
+      const endpoint = await jwksEndpoint({ keys: [publicJwk] })
+      expect(await tagged(remote(endpoint.redirectUrl, { allowInsecureHttp: true }))).toBe("KeySetFetchError")
+    })
+
+    it("cap the response at 128 KiB by default; jose has no limit", async () => {
+      const endpoint = await jwksEndpoint({ keys: [publicJwk] })
+      expect(await tagged(remote(endpoint.bigUrl, { allowInsecureHttp: true }))).toBe("KeySetTooLargeError")
+      expect(await tagged(remote(endpoint.bigUrl, { allowInsecureHttp: true, maxResponseBytes: 300_000 }))).toBe(
+        "Success"
+      )
+      const token = await new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "ES256", kid: "k" }).sign(signingKey)
+      expect(await settle(jose.compactVerify(token, jose.createRemoteJWKSet(new URL(endpoint.bigUrl))))).toEqual({
+        ok: true
+      })
     })
   })
 })
