@@ -41,7 +41,7 @@ const publicJwk = (jwk: Json): Json => {
  */
 const ephemeralKey = (jwk: Json, alg: string) => run(JsonWebKey.importJwk(jwk, alg, { extractable: true })) as Promise<Json>
 
-/** Resolves with the JoseError a failing effect produced. */
+/** Resolves with the tagged error a failing effect produced. */
 const failure = async (promise: Promise<unknown>): Promise<Json> => {
   try {
     await promise
@@ -190,7 +190,7 @@ describe("RFC 7520 Section 4.5 Signature with Detached Content (HS256)", () => {
   })
   it("a detached JWS does not verify without the payload", async () => {
     const error = await failure(run(JsonWebSignature.verifyGeneral(fig(42), hmacKey)))
-    expect(error.reason).toBe("SignatureVerificationFailed")
+    expect(error._tag).toBe("SignatureVerificationError")
   })
 })
 
@@ -279,18 +279,18 @@ const compactParts = (jwe: string) => {
 describe("RFC 7520 Section 5.1 Key Encryption Using RSA v1.5 and AES-HMAC-SHA2", () => {
   const key = fig(73)
   // RSA1_5 is intentionally not supported by effect/jose.
-  it("decryptCompact of Figure 81 fails with NotSupported", async () => {
+  it("decryptCompact of Figure 81 fails with UnsupportedAlgorithmError", async () => {
     const error = await failure(run(JsonWebEncryption.decryptCompact(fig(81), key)))
-    expect(error.reason).toBe("NotSupported")
+    expect(error._tag).toBe("UnsupportedAlgorithmError")
   })
-  it("decryptFlattened of Figure 83 fails with NotSupported", async () => {
+  it("decryptFlattened of Figure 83 fails with UnsupportedAlgorithmError", async () => {
     const error = await failure(run(JsonWebEncryption.decryptFlattened(fig(83), key)))
-    expect(error.reason).toBe("NotSupported")
+    expect(error._tag).toBe("UnsupportedAlgorithmError")
   })
   it("decryptGeneral of Figure 82 fails", async () => {
     // decryptGeneral skips recipients it cannot process and reports a generic failure.
     const error = await failure(run(JsonWebEncryption.decryptGeneral(fig(82), key)))
-    expect(["NotSupported", "DecryptionFailed"]).toContain(error.reason)
+    expect(["UnsupportedAlgorithmError", "DecryptionError"]).toContain(error._tag)
   })
 })
 
@@ -333,7 +333,7 @@ describe("RFC 7520 Section 5.3 Key Wrap Using PBES2-AES-KeyWrap with AES-CBC-HMA
 
   it("PBES2 is rejected unless explicitly allowed", async () => {
     const error = await failure(run(JsonWebEncryption.decryptCompact(fig(105), password)))
-    expect(error.reason).toBe("AlgorithmNotAllowed")
+    expect(error._tag).toBe("AlgorithmNotAllowedError")
   })
   it("decrypts Figure 105 (compact)", async () => {
     const out = await run(JsonWebEncryption.decryptCompact(fig(105), password, options))
@@ -562,24 +562,24 @@ describe("RFC 7520 Section 5.8 Key Wrap Using AES-KeyWrap with AES-GCM", () => {
 describe("RFC 7520 Section 5.9 Compressed Content", () => {
   // "zip" (compression) is intentionally unsupported by effect/jose.
   const key = fig(151)
-  it("decryptCompact of Figure 170 fails with NotSupported", async () => {
+  it("decryptCompact of Figure 170 fails with UnsupportedAlgorithmError", async () => {
     const error = await failure(run(JsonWebEncryption.decryptCompact(fig(170), key)))
-    expect(error.reason).toBe("NotSupported")
+    expect(error._tag).toBe("UnsupportedJweHeaderError")
   })
   it("decryptGeneral / decryptFlattened of Figures 171 / 172 fail", async () => {
     const flat = await failure(run(JsonWebEncryption.decryptFlattened(fig(172), key)))
-    expect(flat.reason).toBe("NotSupported")
+    expect(flat._tag).toBe("UnsupportedJweHeaderError")
     const general = await failure(run(JsonWebEncryption.decryptGeneral(fig(171), key)))
-    expect(["NotSupported", "DecryptionFailed"]).toContain(general.reason)
+    expect(["UnsupportedJweHeaderError", "DecryptionError"]).toContain(general._tag)
   })
-  it("encrypting with \"zip\" fails with NotSupported", async () => {
+  it("encrypting with \"zip\" fails with UnsupportedAlgorithmError", async () => {
     const error = await failure(run(JsonWebEncryption.encryptCompact(plaintext, {
       key,
       protectedHeader: fig(166),
       cek: b64(fig(163)),
       iv: b64(fig(164))
     })))
-    expect(error.reason).toBe("NotSupported")
+    expect(error._tag).toBe("UnsupportedJweHeaderError")
   })
 })
 
@@ -666,10 +666,10 @@ describe("RFC 7520 Section 5.13 Encrypting to Multiple Recipients", () => {
   })
   it("recipient #1 (RSA1_5, Figure 73 key) cannot decrypt because RSA1_5 is unsupported", async () => {
     const out = await failure(run(JsonWebEncryption.decryptGeneral(general, fig(73))))
-    expect(["NotSupported", "DecryptionFailed"]).toContain(out.reason)
+    expect(["UnsupportedAlgorithmError", "DecryptionError"]).toContain(out._tag)
     const { recipients, ...shared } = general
     const flat = await failure(run(JsonWebEncryption.decryptFlattened({ ...shared, ...recipients[0] }, fig(73))))
-    expect(flat.reason).toBe("NotSupported")
+    expect(flat._tag).toBe("UnsupportedAlgorithmError")
   })
   const encryptToRecipients2And3 = async () => {
     const { alg: alg2, kid: kid2 } = fig(209)

@@ -128,7 +128,7 @@ describe("remote JWKS", () => {
 
     const { cooling, counts } = await run(program)
     expect(counts).toEqual([0, 1, 1, 2, 3])
-    expect(cooling._tag === "Failure" && cooling.failure.code).toBe("ERR_JWKS_NO_MATCHING_KEY")
+    expect(cooling._tag === "Failure" && cooling.failure._tag).toBe("NoMatchingKeyError")
   })
 
   it("non-200 responses fail with a typed error", async () => {

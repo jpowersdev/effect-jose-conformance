@@ -8,7 +8,7 @@ import * as jose from "jose"
 import { JsonWebEncryption, JsonWebKey, JsonWebSignature, JsonWebToken } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
-import { settle } from "../src/outcome.ts"
+import { settle, tagged } from "../src/outcome.ts"
 import { run } from "../src/runtime.ts"
 
 const enc = new TextEncoder()
@@ -54,11 +54,11 @@ describe("stricter than jose", () => {
     })
   })
 
-  it("reports malformed PEM as a typed argument error; jose leaks a raw InvalidCharacterError", async () => {
+  it("reports malformed PEM as MalformedKeyError; jose leaks a raw InvalidCharacterError", async () => {
     const pem = "-----BEGIN PUBLIC KEY-----\n!!!\n-----END PUBLIC KEY-----"
     const joseOutcome = await settle(jose.importSPKI(pem, "RS256"))
     expect(joseOutcome.ok === false && joseOutcome.code.startsWith("Unexpected(InvalidCharacterError")).toBe(true)
-    expect(await settle(run(JsonWebKey.importSpki(pem, "RS256")))).toEqual({ ok: false, code: "TypeError" })
+    expect(await tagged(run(JsonWebKey.importSpki(pem, "RS256")))).toBe("MalformedKeyError")
   })
 })
 

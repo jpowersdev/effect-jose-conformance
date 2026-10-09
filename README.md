@@ -18,6 +18,7 @@ package is linked directly from source, so no build step is needed.
 | `test/keys.test.ts` | RFC 7638 thumbprints, PEM (SPKI/PKCS#8) import and export, key generation and JWK import validation match jose. |
 | `test/jwks.test.ts` | Local key set selection matches jose; remote key sets fetch lazily, cache, honour the refetch cooldown, and fail with typed errors. |
 | `test/rfc7520.test.ts` | The worked examples from RFC 7520, with exact byte-for-byte reproduction wherever the inputs are deterministic. |
+| `test/errors.test.ts` | Each failure kind is a distinct tagged error, handled individually with `Effect.catchTag`. |
 | `test/divergences.test.ts` | Each intentional difference from jose, pinned so it stays deliberate (see below). |
 
 ## Intentional differences from jose
@@ -27,7 +28,7 @@ package is linked directly from source, so no build step is needed.
 - **Unsupported on purpose:** JWE compression (`zip: "DEF"`, discouraged by RFC 8725), unsecured `alg: none` JWTs, RSA1_5, ES256K and ML-DSA.
 - **Conventions:** durations are Effect `Duration` inputs (a bare number means milliseconds); unencoded flattened payloads are kept attached rather than detached.
 
-Error codes are compared through `JoseError.code`, which uses jose's `ERR_*` codes. Where jose throws a `TypeError` (key misuse or invalid arguments), `effect/jose` fails with reason `InvalidKey` or `InvalidArgument`, and the tests normalize both to `"TypeError"`.
+Every effect/jose failure kind is its own tagged error class, defined in the module it relates to (for example `JsonWebSignature.SignatureVerificationError` or `JsonWebToken.TokenExpiredError`). To compare outcomes with jose, `src/outcome.ts` maps each tag to jose's equivalent `ERR_*` code; `InvalidKeyError` corresponds to the `TypeError` jose throws for key misuse. `test/errors.test.ts` checks that every tag is unique and mapped.
 
 ## Usage
 
