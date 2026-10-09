@@ -24,7 +24,7 @@ package is linked directly from source, so no build step is needed.
 ## Intentional differences from jose
 
 - **Stricter:** duplicate `crit` values are rejected on verification, and so is non-canonical base64url (padding or whitespace).
-- **Typed errors:** a key whose curve doesn't match the algorithm, or malformed PEM, fails with a `JoseError`; jose leaks raw Web Crypto exceptions in these cases.
+- **Typed errors:** a key whose curve doesn't match the algorithm fails with `InvalidKeyError` and malformed PEM with `MalformedKeyError`; jose leaks raw Web Crypto exceptions in these cases. A key of the wrong type for the algorithm (e.g. RSA for ES256) is `InvalidKeyError`, where jose reports "not supported".
 - **Unsupported on purpose:** JWE compression (`zip: "DEF"`, discouraged by RFC 8725), unsecured `alg: none` JWTs, RSA1_5, ES256K and ML-DSA.
 - **Conventions:** durations are Effect `Duration` inputs (a bare number means milliseconds); unencoded flattened payloads are kept attached rather than detached.
 

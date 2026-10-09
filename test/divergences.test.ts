@@ -54,6 +54,16 @@ describe("stricter than jose", () => {
     })
   })
 
+  it("reports a key of the wrong type for the algorithm as InvalidKeyError; jose reports it as not supported", async () => {
+    const [rsa, es] = await Promise.all([keysFor("RS256"), keysFor("ES256")])
+    const token = await new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "ES256" }).sign(es.signOrEncrypt.jose as any)
+    expect(await settle(jose.compactVerify(token, rsa.verifyOrDecrypt.jwk as any))).toEqual({
+      ok: false,
+      code: "ERR_JOSE_NOT_SUPPORTED"
+    })
+    expect(await tagged(run(JsonWebSignature.verifyCompact(token, rsa.verifyOrDecrypt.jwk as any)))).toBe("InvalidKeyError")
+  })
+
   it("reports malformed PEM as MalformedKeyError; jose leaks a raw InvalidCharacterError", async () => {
     const pem = "-----BEGIN PUBLIC KEY-----\n!!!\n-----END PUBLIC KEY-----"
     const joseOutcome = await settle(jose.importSPKI(pem, "RS256"))
