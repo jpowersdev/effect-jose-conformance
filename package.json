@@ -1,0 +1,19 @@
+{
+  "name": "effect-jose-conformance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit",
+    "fork:update": "git -c protocol.file.allow=always submodule update --remote vendor/effect"
+  },
+  "dependencies": {
+    "effect": "link:./vendor/effect/packages/effect"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "jose": "6.2.12",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
