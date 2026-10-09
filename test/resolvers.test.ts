@@ -3,8 +3,8 @@ import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { JsonWebKeySet, JsonWebSignature } from "effect/jose"
-import { createServer, type Server } from "node:http"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
+import { jwksEndpoint } from "../src/jwksEndpoint.ts"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
 import { run } from "../src/runtime.ts"
@@ -87,29 +87,15 @@ describe("several matching keys", () => {
 })
 
 describe("remote key set storage", () => {
-  let server: Server
-  let url: string
-  let requests = 0
-  let jwks: { keys: Array<jose.JWK> }
-  let token: string
-
-  beforeAll(async () => {
-    const k = await keysFor("ES256")
-    jwks = { keys: [{ ...(k.verifyOrDecrypt.jwk as jose.JWK), kid: "k" }] }
-    token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256", kid: "k" }).sign(k.signOrEncrypt.jose as any)
-    server = createServer((_, res) => {
-      requests++
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(jwks))
-    })
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-    url = `http://127.0.0.1:${(server.address() as { port: number }).port}/jwks`
-  })
-  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
-
   it("a fresh resolver reuses the stored set, like jose's jwksCache", async () => {
-    requests = 0
+    const k = await keysFor("ES256")
+    const jwks = { keys: [{ ...(k.verifyOrDecrypt.jwk as jose.JWK), kid: "k" }] }
+    const token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256", kid: "k" }).sign(
+      k.signOrEncrypt.jose as any
+    )
+    const ours = await jwksEndpoint(jwks)
     const coldStart = Effect.gen(function*() {
-      const resolver = yield* JsonWebKeySet.makeRemote(url, { storage: "keyValueStore" })
+      const resolver = yield* JsonWebKeySet.makeRemote(ours.url, { storage: "keyValueStore" })
       return yield* JsonWebSignature.verifyCompact(token, resolver)
     })
     await run(Effect.gen(function*() {
@@ -117,14 +103,13 @@ describe("remote key set storage", () => {
       yield* coldStart
       yield* coldStart
     }).pipe(Effect.provide([FetchHttpClient.layer, KeyValueStore.layerMemory])))
-    const effectRequests = requests
 
-    requests = 0
+    const theirs = await jwksEndpoint(jwks)
     const cache: jose.ExportedJWKSCache = {} as any
     for (let i = 0; i < 3; i++) {
-      await jose.compactVerify(token, jose.createRemoteJWKSet(new URL(url), { [jose.jwksCache]: cache }))
+      await jose.compactVerify(token, jose.createRemoteJWKSet(new URL(theirs.url), { [jose.jwksCache]: cache }))
     }
-    expect(effectRequests).toBe(1)
-    expect(effectRequests).toBe(requests)
+    expect(await ours.count()).toBe(1)
+    expect(await ours.count()).toBe(await theirs.count())
   })
 })

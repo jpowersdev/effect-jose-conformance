@@ -2,6 +2,8 @@ import * as jose from "jose"
 import { JsonWebEncryption } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
+import { aes192Supported, usesAes192 } from "../src/capabilities.ts"
+import { tagged } from "../src/outcome.ts"
 import { run } from "../src/runtime.ts"
 
 const keyManagement = [
@@ -23,7 +25,29 @@ const cases = keyManagement.flatMap((alg) => contentEncryption.map((enc) => [alg
 describe.each(cases)("JWE %s + %s", (alg, enc) => {
   const allow = { keyManagementAlgorithms: [alg], contentEncryptionAlgorithms: [enc] }
 
-  it("effect encrypts (compact) → jose decrypts", async () => {
+  // Chromium's Web Crypto has no 192-bit AES. There, both libraries must fail,
+  // and effect/jose must say why with UnsupportedAlgorithmError.
+  it.runIf(usesAes192(alg, enc))("fails clearly where the runtime lacks 192-bit AES", async ({ skip }) => {
+    if (await aes192Supported) return skip("runtime supports 192-bit AES")
+    // Asymmetric algorithms get a real key pair; symmetric ones the right-sized secret.
+    const key = alg.startsWith("RSA") || alg.startsWith("ECDH")
+      ? (await keysFor(alg)).signOrEncrypt.jwk
+      : alg === "dir"
+      ? new Uint8Array(enc.includes("CBC") ? Number(enc.slice(-3)) / 8 : Number(enc.slice(1, 4)) / 8)
+      : alg.startsWith("PBES2")
+      ? new TextEncoder().encode("password")
+      : new Uint8Array(Number(alg.slice(1, 4)) / 8)
+    const ours = await tagged(run(JsonWebEncryption.encryptCompact(plaintext, { key: key as any, protectedHeader: { alg, enc } })))
+    expect(ours).toBe("UnsupportedAlgorithmError")
+    const theirs = await new jose.CompactEncrypt(plaintext).setProtectedHeader({ alg, enc }).encrypt(key as any).then(
+      () => "ok",
+      () => "failed"
+    )
+    expect(theirs).toBe("failed")
+  })
+
+  it("effect encrypts (compact) → jose decrypts", async ({ skip }) => {
+    if (usesAes192(alg, enc) && !(await aes192Supported)) return skip("runtime lacks 192-bit AES")
     const keys = await keysFor(alg, { enc })
     const jwe = await run(JsonWebEncryption.encryptCompact(plaintext, {
       key: keys.signOrEncrypt.jwk as any,
@@ -34,7 +58,8 @@ describe.each(cases)("JWE %s + %s", (alg, enc) => {
     expect(out.protectedHeader.kid).toBe("k1")
   })
 
-  it("jose encrypts (compact) → effect decrypts", async () => {
+  it("jose encrypts (compact) → effect decrypts", async ({ skip }) => {
+    if (usesAes192(alg, enc) && !(await aes192Supported)) return skip("runtime lacks 192-bit AES")
     const keys = await keysFor(alg, { enc })
     const jwe = await new jose.CompactEncrypt(plaintext).setProtectedHeader({ alg, enc }).encrypt(
       keys.signOrEncrypt.jose as any

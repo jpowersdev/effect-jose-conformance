@@ -5,14 +5,17 @@
   "scripts": {
     "test": "vitest run",
     "check": "tsc --noEmit",
-    "fork:update": "git -c protocol.file.allow=always submodule update --remote vendor/effect"
+    "fork:update": "git -c protocol.file.allow=always submodule update --remote vendor/effect",
+    "test:all": "nix run .#test-all"
   },
   "dependencies": {
     "effect": "link:./vendor/effect/packages/effect"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@vitest/browser-playwright": "5.0.3",
     "jose": "6.2.12",
+    "playwright": "1.63.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
   }

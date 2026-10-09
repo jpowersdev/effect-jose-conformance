@@ -3,8 +3,8 @@ import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as TestClock from "effect/testing/TestClock"
 import { JsonWebKeySet, JsonWebSignature, JsonWebToken } from "effect/jose"
-import { createServer, type Server } from "node:http"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
+import { jwksEndpoint } from "../src/jwksEndpoint.ts"
 import { keysFor, type KeyMaterial } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
 import { run } from "../src/runtime.ts"
@@ -78,51 +78,44 @@ describe("local JWKS selection matches jose", () => {
 })
 
 describe("remote JWKS", () => {
-  let server: Server
-  let url: string
-  let requests = 0
-  let current: { keys: Array<jose.JWK> } = { keys: [] }
   let a: KeyMaterial, b: KeyMaterial
 
   beforeAll(async () => {
     ;[a, b] = await Promise.all([keysFor("ES256"), keysFor("ES256")])
-    current = { keys: [{ ...(a.verifyOrDecrypt.jwk as jose.JWK), kid: "a" }] }
-    server = createServer((req, res) => {
-      requests++
-      if (req.url === "/fail") {
-        res.writeHead(500).end()
-        return
-      }
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(current))
-    })
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-    const address = server.address() as { port: number }
-    url = `http://127.0.0.1:${address.port}`
   })
-  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
 
   it("fetches lazily, caches, refetches on unknown kid after cooldown, and fails with typed errors", async () => {
-    requests = 0
-    current = { keys: [{ ...(a.verifyOrDecrypt.jwk as jose.JWK), kid: "a" }] }
+    const endpoint = await jwksEndpoint({ keys: [{ ...(a.verifyOrDecrypt.jwk as jose.JWK), kid: "a" }] })
     const tokenA = await signed(a, { alg: "ES256", kid: "a" })
     const tokenB = await signed(b, { alg: "ES256", kid: "b" })
+    const requests = Effect.promise(endpoint.count)
 
     const program = Effect.gen(function*() {
-      const resolver = yield* JsonWebKeySet.makeRemote(url, { cooldownDuration: "30 seconds", cacheMaxAge: "10 minutes" })
+      const resolver = yield* JsonWebKeySet.makeRemote(endpoint.url, {
+        cooldownDuration: "30 seconds",
+        cacheMaxAge: "10 minutes"
+      })
       const counts: Array<number> = []
-      counts.push(requests) // lazily: nothing fetched yet
+      counts.push(yield* requests) // lazily: nothing fetched yet
       yield* JsonWebSignature.verifyCompact(tokenA, resolver)
       yield* JsonWebSignature.verifyCompact(tokenA, resolver)
-      counts.push(requests) // one fetch, then cached
-      current = { keys: [...current.keys, { ...(b.verifyOrDecrypt.jwk as jose.JWK), kid: "b" }] }
+      counts.push(yield* requests) // one fetch, then cached
+      yield* Effect.promise(() =>
+        endpoint.set({
+          keys: [
+            { ...(a.verifyOrDecrypt.jwk as jose.JWK), kid: "a" },
+            { ...(b.verifyOrDecrypt.jwk as jose.JWK), kid: "b" }
+          ]
+        })
+      )
       const cooling = yield* Effect.result(JsonWebSignature.verifyCompact(tokenB, resolver))
-      counts.push(requests) // within cooldown: no refetch
+      counts.push(yield* requests) // within cooldown: no refetch
       yield* TestClock.adjust("31 seconds")
       yield* JsonWebSignature.verifyCompact(tokenB, resolver)
-      counts.push(requests) // after cooldown: refetched once, kid "b" now found
+      counts.push(yield* requests) // after cooldown: refetched once, kid "b" now found
       yield* TestClock.adjust("11 minutes")
       yield* JsonWebSignature.verifyCompact(tokenA, resolver)
-      counts.push(requests) // stale cache: refetched
+      counts.push(yield* requests) // stale cache: refetched
       return { counts, cooling }
     }).pipe(Effect.provide([FetchHttpClient.layer, TestClock.layer()]))
 
@@ -132,12 +125,13 @@ describe("remote JWKS", () => {
   })
 
   it("non-200 responses fail with a typed error", async () => {
+    const endpoint = await jwksEndpoint()
     const tokenA = await signed(a, { alg: "ES256", kid: "a" })
     const outcome = await settle(run(Effect.gen(function*() {
-      const resolver = yield* JsonWebKeySet.makeRemote(`${url}/fail`)
+      const resolver = yield* JsonWebKeySet.makeRemote(endpoint.failUrl)
       return yield* JsonWebSignature.verifyCompact(tokenA, resolver)
     }).pipe(Effect.provide(FetchHttpClient.layer))))
     expect(outcome).toEqual({ ok: false, code: "ERR_JOSE_GENERIC" })
-    expect(await settle(jose.compactVerify(tokenA, jose.createRemoteJWKSet(new URL(`${url}/fail`))))).toEqual(outcome)
+    expect(await settle(jose.compactVerify(tokenA, jose.createRemoteJWKSet(new URL(endpoint.failUrl))))).toEqual(outcome)
   })
 })

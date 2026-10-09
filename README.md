@@ -31,12 +31,44 @@ package is linked directly from source, so no build step is needed.
 
 Every effect/jose failure kind is its own tagged error class, defined in the module it relates to (for example `JsonWebSignature.SignatureVerificationError` or `JsonWebToken.TokenExpiredError`). To compare outcomes with jose, `src/outcome.ts` maps each tag to jose's equivalent `ERR_*` code; `InvalidKeyError` corresponds to the `TypeError` jose throws for key misuse. `test/errors.test.ts` checks that every tag is unique and mapped.
 
-## Usage
+## Runtimes
+
+The suite runs unchanged on every supported JavaScript runtime. A Nix flake
+pins the runtimes and the Playwright browsers, so results are reproducible:
+
+```sh
+nix run .#test-all        # everything below, with a summary
+nix run .#test-node22     # Node.js 22 (also test-node24, test-node26)
+nix run .#test-deno       # Deno
+nix run .#test-bun        # Bun
+nix run .#test-browsers   # Chromium, Firefox, and WebKit via Playwright
+nix develop               # shell with Node.js, pnpm, Deno, Bun, and browsers
+```
+
+Server runtimes run Vitest's `server` project with the runtime's own
+executable, so test workers run in that runtime; `test/runtime.server.test.ts`
+fails if they do not. The `browser` project runs the same tests in each
+browser, and `test/runtime.browser.test.ts` checks the engine. Remote key set
+tests use an HTTP server started in Vitest's global setup (`src/jwksServer.ts`),
+reachable from browsers.
+
+Runtime-specific behaviour is asserted rather than skipped. Chromium's Web
+Crypto has no 192-bit AES, so there the `A192*` algorithms must fail, with
+`UnsupportedAlgorithmError` from effect/jose; `src/capabilities.ts` probes for
+this.
+
+Apps install dependencies with pinned Node.js and pnpm on first use. Extra
+arguments are passed to Vitest, e.g. `nix run .#test-deno -- test/jwt.parity.test.ts`.
+
+The npm `playwright` version must match nixpkgs' `playwright-driver`, since
+the browsers come from nixpkgs.
+
+## Development
 
 ```sh
 git submodule update --init
 pnpm install
-pnpm test        # vitest
+pnpm test        # all projects with the local Node.js
 pnpm check       # tsc (TypeScript 7, matching the fork)
 pnpm fork:update # move the pin to the latest commit on the fork's jose branch
 ```

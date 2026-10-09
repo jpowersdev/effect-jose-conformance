@@ -42,12 +42,13 @@ describe("stricter than jose", () => {
     expect(outcomes[0].ok === true || outcomes[0].ok === false).toBe(true)
   })
 
-  it("reports a key whose curve does not match the algorithm as ERR_JWK_INVALID; jose leaks a raw DataError", async () => {
+  it("reports a key whose curve does not match the algorithm as ERR_JWK_INVALID; jose leaks a raw runtime exception", async () => {
     const [p384, p256] = await Promise.all([keysFor("ES384"), keysFor("ES256")])
     const token = await new jose.CompactSign(enc.encode("x")).setProtectedHeader({ alg: "ES256" }).sign(p256.signOrEncrypt.jose as any)
     const joseOutcome = await settle(jose.compactVerify(token, p384.verifyOrDecrypt.jwk as any))
     expect(joseOutcome.ok).toBe(false)
-    expect(joseOutcome.ok === false && joseOutcome.code.startsWith("Unexpected(DataError")).toBe(true)
+    // The exact exception depends on the runtime's Web Crypto; it is never a jose error code.
+    expect(joseOutcome.ok === false && !joseOutcome.code.startsWith("ERR_")).toBe(true)
     expect(await settle(run(JsonWebSignature.verifyCompact(token, p384.verifyOrDecrypt.jwk as any)))).toEqual({
       ok: false,
       code: "ERR_JWK_INVALID"
@@ -76,10 +77,11 @@ describe("stricter than jose", () => {
     expect(await tagged(run(JsonWebSignature.verifyCompact(token, rsa.verifyOrDecrypt.jwk as any)))).toBe("InvalidKeyError")
   })
 
-  it("reports malformed PEM as MalformedKeyError; jose leaks a raw InvalidCharacterError", async () => {
+  it("reports malformed PEM as MalformedKeyError; jose leaks a raw runtime exception", async () => {
     const pem = "-----BEGIN PUBLIC KEY-----\n!!!\n-----END PUBLIC KEY-----"
     const joseOutcome = await settle(jose.importSPKI(pem, "RS256"))
-    expect(joseOutcome.ok === false && joseOutcome.code.startsWith("Unexpected(InvalidCharacterError")).toBe(true)
+    // The exact exception depends on the runtime's base64 decoder; it is never a jose error code.
+    expect(joseOutcome.ok === false && !joseOutcome.code.startsWith("ERR_")).toBe(true)
     expect(await tagged(run(JsonWebKey.importSpki(pem, "RS256")))).toBe("MalformedKeyError")
   })
 })

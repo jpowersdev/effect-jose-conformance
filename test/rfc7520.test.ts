@@ -9,23 +9,22 @@
  * after re-joining wrapped string values, and the "\xNN" byte escapes used in
  * the RFC text (U+2019, U+2013) were decoded to their UTF-8 characters.
  */
-import { readFileSync } from "node:fs"
+import * as jose from "jose"
 import { JsonWebEncryption, JsonWebKey, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { run } from "../src/runtime.ts"
+import figureData from "./fixtures/rfc7520/figures.json" with { type: "json" }
 
 type Json = any
 
-const figures: Record<string, { readonly caption: string; readonly value: Json }> = JSON.parse(
-  readFileSync(new URL("./fixtures/rfc7520/figures.json", import.meta.url), "utf8")
-)
+const figures: Record<string, { readonly caption: string; readonly value: Json }> = figureData
 const fig = (n: number): Json => {
   const figure = figures[String(n)]
   if (!figure) throw new Error(`missing RFC 7520 Figure ${n}`)
   return figure.value
 }
 
-const b64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64url"))
+const b64 = (s: string): Uint8Array => jose.base64url.decode(s)
 const utf8 = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 const encodeUtf8 = (s: string): Uint8Array => new TextEncoder().encode(s)
 
@@ -82,7 +81,7 @@ describe("RFC 7520 Section 4.1 RSA v1.5 Signature (RS256)", () => {
   const compact: string = fig(13)
 
   it("protected header serializes to Figure 10", () => {
-    expect(Buffer.from(JSON.stringify(header)).toString("base64url")).toBe(compact.split(".")[0])
+    expect(jose.base64url.encode(JSON.stringify(header))).toBe(compact.split(".")[0])
   })
   it("signCompact produces Figure 13 exactly", async () => {
     const jws = await run(JsonWebSignature.signCompact(payloadText, { key: rsaPrivate, protectedHeader: header }))
