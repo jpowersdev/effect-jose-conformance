@@ -74,7 +74,7 @@ platform layers.
 | `JsonWebEncryption` | Compact, flattened, and general JWE, including several recipients |
 | `JsonWebToken` | Signed and encrypted JWTs, claim validation, Schema-typed claims |
 
-Size: about 4,800 lines of source.
+Size: about 5,500 lines of source.
 
 ### API style
 
@@ -199,8 +199,9 @@ A separate conformance repository pins the fork and tests it against
 - **Every runtime, through a Nix flake:** Node.js 22, 24, and 26, Deno, Bun,
   Chromium, Firefox, and WebKit. Runtime-specific behaviour (Chromium's lack of
   192-bit AES) is asserted rather than skipped.
-- **Totals:** 525 tests on each server runtime and 1,575 in browsers. The fork
-  adds about 100 unit tests and type tests of its own.
+- **Totals:** 532 tests on each server runtime and 1,596 in browsers. The fork
+  adds 89 unit tests and 7 type tests of its own, plus tests for the `Crypto` key
+  operations.
 
 ## Intentional differences from jose
 
