@@ -5,6 +5,8 @@ opened upstream yet.
 
 - **Implementation:** [`jose` branch of jpowersdev/effect](https://github.com/jpowersdev/effect/tree/jose)
 - **Conformance tests:** [jpowersdev/effect-jose-conformance](https://github.com/jpowersdev/effect-jose-conformance)
+- **Examples of common workflows:** [examples/](../examples)
+- **Bundle size:** [bundle-size.md](bundle-size.md)
 
 ## Summary
 
@@ -203,7 +205,8 @@ A separate conformance repository pins the fork and tests it against
 - **Every runtime, through a Nix flake:** Node.js 22, 24, and 26, Deno, Bun,
   Chromium, Firefox, and WebKit. Runtime-specific behaviour (Chromium's lack of
   192-bit AES) is asserted rather than skipped.
-- **Totals:** 532 tests on each server runtime and 1,596 in browsers. The fork
+- **Totals:** 539 tests on each server runtime and 1,617 in browsers, including
+  runnable examples of common workflows. The fork
   adds 89 unit tests and 7 type tests of its own, plus tests for the `Crypto` key
   operations.
 
@@ -246,8 +249,12 @@ Each fails with a specific error, and tests pin that behaviour.
 4. **Delivery:** is the PR plan below the preferred split?
 5. **Cross-runtime testing:** should the conformance suite (or part of it) live in
    the Effect repository, or stay external?
-6. **Bundle size:** not measured yet. The next step would be to measure the cost
-   of importing `effect/jose` with the repository's bundle tooling.
+6. **Bundle size:** measured in [bundle-size.md](bundle-size.md). In an
+   application that already uses `Schema`, verifying a JWT adds 8.3 KB
+   (gzipped), against 5.6 KB for `jose`. Without `Schema` in the application it
+   adds 19.8 KB, mostly `Schema` itself, because errors are
+   `Schema.TaggedError`s. Is that trade-off acceptable, or should errors use
+   `Data.TaggedError`?
 
 ## Suggested PR plan
 
