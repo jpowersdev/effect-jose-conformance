@@ -44,11 +44,15 @@ class Unauthorized extends Schema.TaggedError<Unauthorized>()(
   { httpApiStatus: 401 }
 ) {}
 
-class CurrentUser extends Context.Service<CurrentUser, User>()("example/CurrentUser") {}
+class CurrentUser extends Context.Service<
+  CurrentUser,
+  User
+>()("example/CurrentUser") {}
 
-class Authorization extends HttpApiMiddleware.Service<Authorization, {
-  provides: CurrentUser
-}>()("example/Authorization", {
+class Authorization extends HttpApiMiddleware.Service<
+  Authorization,
+  { provides: CurrentUser }
+>()("example/Authorization", {
   requiredForClient: true,
   security: { bearer: HttpApiSecurity.bearer },
   error: Unauthorized
@@ -72,9 +76,12 @@ const AccessTokenClaims = Schema.Struct({
 })
 
 /** Verifies access tokens against the identity provider's published key set. */
-class AccessTokens extends Context.Service<AccessTokens, {
-  readonly verify: (token: Redacted.Redacted<string>) => Effect.Effect<User, Unauthorized>
-}>()("example/AccessTokens") {
+class AccessTokens extends Context.Service<
+  AccessTokens,
+  {
+    readonly verify: (token: Redacted.Redacted<string>) => Effect.Effect<User, Unauthorized>
+  }
+>()("example/AccessTokens") {
   /** The service, with its `HttpClient` and `Crypto` left to the caller. */
   static readonly layerNoDeps = Layer.effect(
     AccessTokens,
@@ -166,12 +173,15 @@ const whoami = (token?: Redacted.Redacted<string>) =>
  * Issues access tokens, and answers requests for its key set through
  * `jwksClient`, standing in for the provider's HTTPS endpoint.
  */
-class IdentityProvider extends Context.Service<IdentityProvider, {
-  readonly issue: (
-    claims: { readonly sub: string; readonly scope: string }
-  ) => Effect.Effect<Redacted.Redacted<JsonWebToken.Signed>, JsonWebToken.SignError>
-  readonly jwksClient: HttpClient.HttpClient
-}>()("example/IdentityProvider") {
+class IdentityProvider extends Context.Service<
+  IdentityProvider,
+  {
+    readonly issue: (
+      claims: { readonly sub: string; readonly scope: string }
+    ) => Effect.Effect<Redacted.Redacted<JsonWebToken.Signed>, JsonWebToken.SignError>
+    readonly jwksClient: HttpClient.HttpClient
+  }
+>()("example/IdentityProvider") {
   static readonly layer = Layer.effect(
     IdentityProvider,
     Effect.gen(function*() {
