@@ -14,7 +14,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import { Context, Crypto, Effect, Layer, Redacted, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter } from "effect/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter } from "effect/http"
 import {
   HttpApi,
   HttpApiBuilder,
@@ -75,7 +75,8 @@ const AccessTokenClaims = Schema.Struct({
 class AccessTokens extends Context.Service<AccessTokens, {
   readonly verify: (token: Redacted.Redacted<string>) => Effect.Effect<User, Unauthorized>
 }>()("example/AccessTokens") {
-  static readonly layer = Layer.effect(
+  /** The service, with its `HttpClient` and `Crypto` left to the caller. */
+  static readonly layerNoDeps = Layer.effect(
     AccessTokens,
     Effect.gen(function*() {
       // Captured once, so `verify` has no requirements of its own.
@@ -101,6 +102,11 @@ class AccessTokens extends Context.Service<AccessTokens, {
 
       return AccessTokens.of({ verify })
     })
+  )
+
+  /** The service, reaching the identity provider over HTTPS. */
+  static readonly layer = AccessTokens.layerNoDeps.pipe(
+    Layer.provide([FetchHttpClient.layer, NodeCrypto.layer])
   )
 }
 
@@ -128,15 +134,11 @@ const ApiLive = HttpApiBuilder.layer(Api).pipe(
   Layer.provide(AuthorizationLive)
 )
 
-// In production, serve on a port and reach the identity provider over HTTPS:
+// In production, serve on a port:
 //
 //   HttpRouter.serve(ApiLive).pipe(
 //     Layer.provide(AccessTokens.layer),
-//     Layer.provide([
-//       NodeHttpServer.layer(createServer, { port: 3000 }),
-//       FetchHttpClient.layer,
-//       NodeCrypto.layer
-//     ])
+//     Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 }))
 //   )
 
 // -----------------------------------------------------------------------------
@@ -219,7 +221,7 @@ class IdentityProvider extends Context.Service<IdentityProvider, {
 
 /** Serves the API on a free port, with an `HttpClient` pointed at it. */
 const ExampleLive = HttpRouter.serve(ApiLive, { disableLogger: true, disableListenLog: true }).pipe(
-  Layer.provide(AccessTokens.layer.pipe(Layer.provide(IdentityProvider.layerHttpClient))),
+  Layer.provide(AccessTokens.layerNoDeps.pipe(Layer.provide(IdentityProvider.layerHttpClient))),
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provideMerge(IdentityProvider.layer),
   Layer.provide(NodeCrypto.layer)
