@@ -9,13 +9,14 @@ package is linked directly from source, so no build step is needed.
 
 ## Example
 
-[`examples/http-api-bearer-auth.ts`](examples/http-api-bearer-auth.ts) shows
-the most common workflow end to end: an auth server publishes its key set and
-issues tokens, an `HttpApi` verifies bearer tokens against that remote key set
-in middleware, and a typed `HttpApiClient` calls it with a valid, missing, and
-forged token. Everything runs in memory, so `node examples/http-api-bearer-auth.ts`
-(or Deno or Bun) runs it directly, and `test/examples.test.ts` runs it on every
-runtime.
+[`examples/http-api-bearer-auth.ts`](examples/http-api-bearer-auth.ts) protects
+an `HttpApi` with access tokens from an identity provider: the
+`Authorization` middleware verifies bearer tokens against the provider's
+remote key set and provides the current user. It serves the API with
+`NodeHttpServer` and calls it with the generated `HttpApiClient`; only the
+identity provider is simulated. Run it with `node examples/http-api-bearer-auth.ts`
+(or Deno or Bun). `test/examples.server.test.ts` runs it on every server
+runtime and checks what it logs.
 
 ## Bundle size
 

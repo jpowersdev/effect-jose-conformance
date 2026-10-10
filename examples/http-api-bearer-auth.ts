@@ -1,24 +1,20 @@
 /**
- * # Protecting an HttpApi with tokens from an identity provider
+ * # Protecting an HttpApi with access tokens
  *
- * Three parties, wired together in memory so the example runs anywhere:
+ * An API that accepts access tokens issued by an identity provider (Auth0,
+ * Okta, Cognito, Keycloak, ...). The `Authorization` middleware verifies the
+ * bearer token against the provider's published key set and provides the
+ * current user to handlers.
  *
- * - **Auth server** (`https://auth.example`): issues ES256 access tokens and
- *   publishes its public keys at `/.well-known/jwks.json`.
- * - **API** (`https://api.example`): an `HttpApi` whose middleware verifies
- *   bearer tokens against the auth server's key set and provides the user.
- * - **Client**: calls the API through `HttpApiClient` with a token.
- *
- * In a real deployment, replace `network` with `FetchHttpClient.layer` and
- * `CryptoLive` with your platform's layer (`NodeCrypto.layer` from
- * `@effect/platform-node`, or the Bun, Deno, or browser equivalent).
+ * The example serves the API on a free port and calls it with the generated
+ * client. The identity provider is simulated in memory: everything else is
+ * what an application would write.
  */
-import * as Context from "effect/Context"
-import * as Crypto from "effect/Crypto"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
-import * as Schema from "effect/Schema"
-import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter, HttpServer } from "effect/http"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import { Context, Crypto, Effect, Layer, Redacted, Schema } from "effect"
+import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter } from "effect/http"
 import {
   HttpApi,
   HttpApiBuilder,
@@ -30,158 +26,219 @@ import {
 } from "effect/http-api"
 import { JsonWebKey, JsonWebKeySet, JsonWebToken } from "effect/jose"
 
-const AUTH = "https://auth.example"
-const API = "https://api.example"
+const ISSUER = "https://auth.example.com"
+const AUDIENCE = "https://api.example.com"
 
-// --- API definition, shared by server and client ---------------------------
+// -----------------------------------------------------------------------------
+// API definition, shared by the server and its clients
+// -----------------------------------------------------------------------------
 
-class User extends Schema.Class<User>("User")({ id: Schema.String, scopes: Schema.Array(Schema.String) }) {}
-
-class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {}, { httpApiStatus: 401 }) {}
-
-class CurrentUser extends Context.Service<CurrentUser, User>()("CurrentUser") {}
-
-class Authorization extends HttpApiMiddleware.Service<Authorization, { provides: CurrentUser }>()("Authorization", {
-  error: Unauthorized,
-  security: { bearer: HttpApiSecurity.bearer }
+class User extends Schema.Class<User>("User")({
+  id: Schema.String,
+  scopes: Schema.Array(Schema.String)
 }) {}
 
-const Api = HttpApi.make("api").add(
-  HttpApiGroup.make("me").add(HttpApiEndpoint.get("whoami", "/me", { success: User })).middleware(Authorization)
-)
+class Unauthorized extends Schema.TaggedError<Unauthorized>()(
+  "Unauthorized",
+  { message: Schema.String },
+  { httpApiStatus: 401 }
+) {}
 
-// --- API server -------------------------------------------------------------
+class CurrentUser extends Context.Service<CurrentUser, User>()("example/CurrentUser") {}
 
-const AccessToken = Schema.Struct({
+class Authorization extends HttpApiMiddleware.Service<Authorization, {
+  provides: CurrentUser
+}>()("example/Authorization", {
+  requiredForClient: true,
+  security: { bearer: HttpApiSecurity.bearer },
+  error: Unauthorized
+}) {}
+
+class MeGroup extends HttpApiGroup.make("me")
+  .add(HttpApiEndpoint.get("whoami", "/me", { success: User }))
+  .middleware(Authorization)
+{}
+
+class Api extends HttpApi.make("api").add(MeGroup) {}
+
+// -----------------------------------------------------------------------------
+// Server
+// -----------------------------------------------------------------------------
+
+const AccessTokenClaims = Schema.Struct({
   ...JsonWebToken.RegisteredClaims.fields,
   sub: Schema.String,
   scope: Schema.String
 })
 
-/** Verifies bearer tokens against the auth server's published key set. */
+/** Verifies access tokens against the identity provider's published key set. */
+class AccessTokens extends Context.Service<AccessTokens, {
+  readonly verify: (token: Redacted.Redacted<string>) => Effect.Effect<User, Unauthorized>
+}>()("example/AccessTokens") {
+  static readonly layer = Layer.effect(
+    AccessTokens,
+    Effect.gen(function*() {
+      // Captured once, so `verify` has no requirements of its own.
+      const crypto = yield* Crypto.Crypto
+      const keys = yield* JsonWebKeySet.makeRemote(`${ISSUER}/.well-known/jwks.json`)
+      // Fetch the key set while starting up, rather than on the first request.
+      yield* keys.refresh
+
+      const verify = Effect.fn("AccessTokens.verify")(
+        function*(token: Redacted.Redacted<string>) {
+          const { payload } = yield* JsonWebToken.verify(token, keys, {
+            schema: AccessTokenClaims,
+            algorithms: ["ES256"],
+            issuer: ISSUER,
+            audience: AUDIENCE
+          })
+          return new User({ id: payload.sub, scopes: payload.scope.split(" ") })
+        },
+        Effect.tapError((error) => Effect.logWarning(`Rejected access token: ${error._tag}`)),
+        Effect.mapError(() => new Unauthorized({ message: "Invalid access token" })),
+        Effect.provideService(Crypto.Crypto, crypto)
+      )
+
+      return AccessTokens.of({ verify })
+    })
+  )
+}
+
 const AuthorizationLive = Layer.effect(
   Authorization,
   Effect.gen(function*() {
-    const keys = yield* JsonWebKeySet.makeRemote(`${AUTH}/.well-known/jwks.json`)
-    // Fetch the key set at startup rather than on the first request.
-    yield* keys.refresh
-    const context = yield* Effect.context<HttpClient.HttpClient | Crypto.Crypto>()
+    const accessTokens = yield* AccessTokens
 
     return Authorization.of({
-      bearer: (effect, { credential }) =>
-        Effect.provideServiceEffect(
-          effect,
-          CurrentUser,
-          JsonWebToken.verify(credential, keys, {
-            schema: AccessToken,
-            algorithms: ["ES256"],
-            issuer: AUTH,
-            audience: API
-          }).pipe(
-            Effect.map(({ payload }) => new User({ id: payload.sub, scopes: payload.scope.split(" ") })),
-            Effect.tapError((error) => Effect.logWarning("rejected bearer token", error._tag)),
-            Effect.mapError(() => new Unauthorized()),
-            Effect.provideContext(context)
-          )
-        )
+      bearer: Effect.fn(function*(httpEffect, { credential }) {
+        if (Redacted.value(credential) === "") {
+          return yield* new Unauthorized({ message: "Missing access token" })
+        }
+        const user = yield* accessTokens.verify(credential)
+        return yield* Effect.provideService(httpEffect, CurrentUser, user)
+      })
     })
   })
 )
 
-const MeLive = HttpApiBuilder.group(Api, "me", (handlers) => handlers.handle("whoami", () => Effect.service(CurrentUser)))
+const MeHandlers = HttpApiBuilder.group(Api, "me", (handlers) => handlers.handle("whoami", () => CurrentUser))
 
-const ApiServer = HttpApiBuilder.layer(Api).pipe(
-  Layer.provide(MeLive),
-  Layer.provide(AuthorizationLive),
-  Layer.provide(HttpServer.layerServices)
+const ApiLive = HttpApiBuilder.layer(Api).pipe(
+  Layer.provide(MeHandlers),
+  Layer.provide(AuthorizationLive)
 )
 
-// --- Auth server ------------------------------------------------------------
+// In production, serve on a port and reach the identity provider over HTTPS:
+//
+//   HttpRouter.serve(ApiLive).pipe(
+//     Layer.provide(AccessTokens.layer),
+//     Layer.provide([
+//       NodeHttpServer.layer(createServer, { port: 3000 }),
+//       FetchHttpClient.layer,
+//       NodeCrypto.layer
+//     ])
+//   )
 
-const makeAuthServer = Effect.gen(function*() {
-  const { privateKey, publicKey } = yield* JsonWebKey.generateKeyPair("ES256", { extractable: true })
-  const kid = yield* JsonWebKey.thumbprint(publicKey)
-  const jwks = { keys: [{ ...(yield* JsonWebKey.exportJwk(publicKey)), kid, use: "sig", alg: "ES256" }] }
+// -----------------------------------------------------------------------------
+// Client
+// -----------------------------------------------------------------------------
 
-  const issueToken = (sub: string, scope: string) =>
-    JsonWebToken.sign({ sub, scope }, {
-      key: privateKey,
-      protectedHeader: { alg: "ES256", kid },
-      issuer: AUTH,
-      audience: API,
-      expirationTime: "5 minutes"
-    })
-
-  const handler = (request: Request) =>
-    new URL(request.url).pathname === "/.well-known/jwks.json"
-      ? new Response(JSON.stringify(jwks), { headers: { "cache-control": "max-age=300" } })
-      : new Response(null, { status: 404 })
-
-  return { issueToken, handler }
-})
-
-// --- In-memory network ------------------------------------------------------
-
-/** An `HttpClient` that delivers requests to in-process handlers by origin. */
-const network = (servers: Record<string, (request: Request) => Response | Promise<Response>>) =>
-  Layer.succeed(
-    HttpClient.HttpClient,
-    HttpClient.make((request) =>
-      Effect.gen(function*() {
-        const web = new Request(request.url, {
-          method: request.method,
-          headers: request.headers as Record<string, string>
-        })
-        const server = servers[new URL(request.url).origin]
-        const response = server ? yield* Effect.promise(async () => server(web)) : new Response(null, { status: 502 })
-        return HttpClientResponse.fromWeb(request, response)
-      })
-    )
+/** The client half of `Authorization`: sends the bearer token, if there is one. */
+const sendToken = (token: Redacted.Redacted<string> | undefined) =>
+  HttpApiMiddleware.layerClient(
+    Authorization,
+    ({ next, request }) => next(token === undefined ? request : HttpClientRequest.bearerToken(request, token))
   )
 
-const CryptoLive = Layer.succeed(
-  Crypto.Crypto,
-  Crypto.make({
-    randomBytes: (size) => globalThis.crypto.getRandomValues(new Uint8Array(size)),
-    digest: (algorithm, data) =>
-      Effect.map(
-        Effect.promise(() => globalThis.crypto.subtle.digest(algorithm, new Uint8Array(data))),
-        (buffer) => new Uint8Array(buffer)
-      ),
-    keys: Crypto.makeKeyOperations(globalThis.crypto.subtle)
-  })
+const whoami = (token?: Redacted.Redacted<string>) =>
+  HttpApiClient.make(Api).pipe(
+    Effect.flatMap((client) => client.me.whoami()),
+    Effect.provide(sendToken(token))
+  )
+
+// -----------------------------------------------------------------------------
+// A simulated identity provider
+// -----------------------------------------------------------------------------
+
+/**
+ * Issues access tokens, and answers requests for its key set through
+ * `jwksClient`, standing in for the provider's HTTPS endpoint.
+ */
+class IdentityProvider extends Context.Service<IdentityProvider, {
+  readonly issue: (
+    claims: { readonly sub: string; readonly scope: string }
+  ) => Effect.Effect<Redacted.Redacted<JsonWebToken.Signed>, JsonWebToken.SignError>
+  readonly jwksClient: HttpClient.HttpClient
+}>()("example/IdentityProvider") {
+  static readonly layer = Layer.effect(
+    IdentityProvider,
+    Effect.gen(function*() {
+      // Captured once, so `issue` has no requirements of its own.
+      const crypto = yield* Crypto.Crypto
+      const { privateKey, publicKey } = yield* JsonWebKey.generateKeyPair("ES256")
+      const kid = yield* JsonWebKey.thumbprint(publicKey)
+      const publicJwk = yield* JsonWebKey.exportJwk(publicKey)
+      const jwks = { keys: [{ ...publicJwk, kid, use: "sig", alg: "ES256" }] }
+
+      const issue = Effect.fn("IdentityProvider.issue")(
+        function*(claims: { readonly sub: string; readonly scope: string }) {
+          return yield* JsonWebToken.sign(claims, {
+            key: privateKey,
+            protectedHeader: { alg: "ES256", kid },
+            issuer: ISSUER,
+            audience: AUDIENCE,
+            expirationTime: "5 minutes"
+          })
+        },
+        Effect.provideService(Crypto.Crypto, crypto)
+      )
+
+      const jwksClient = HttpClient.make((request) =>
+        Effect.succeed(HttpClientResponse.fromWeb(
+          request,
+          request.url === `${ISSUER}/.well-known/jwks.json`
+            ? Response.json(jwks, { headers: { "cache-control": "max-age=300" } })
+            : new Response(null, { status: 404 })
+        ))
+      )
+
+      return IdentityProvider.of({ issue, jwksClient })
+    })
+  )
+
+  /** The `HttpClient` through which the API reaches the provider. */
+  static readonly layerHttpClient = Layer.effect(
+    HttpClient.HttpClient,
+    Effect.map(IdentityProvider, (identityProvider) => identityProvider.jwksClient)
+  )
+}
+
+// -----------------------------------------------------------------------------
+// Run it
+// -----------------------------------------------------------------------------
+
+/** Serves the API on a free port, with an `HttpClient` pointed at it. */
+const ExampleLive = HttpRouter.serve(ApiLive, { disableLogger: true, disableListenLog: true }).pipe(
+  Layer.provide(AccessTokens.layer.pipe(Layer.provide(IdentityProvider.layerHttpClient))),
+  Layer.provideMerge(NodeHttpServer.layerTest),
+  Layer.provideMerge(IdentityProvider.layer),
+  Layer.provide(NodeCrypto.layer)
 )
 
-// --- Putting it together: a client calls the API ------------------------------
-
 export const main = Effect.gen(function*() {
-  const auth = yield* makeAuthServer
-  // The API reaches the auth server over the network.
-  const api = HttpRouter.toWebHandler(ApiServer.pipe(Layer.provide([network({ [AUTH]: auth.handler }), CryptoLive])), {
-    disableLogger: true
-  })
-  yield* Effect.addFinalizer(() => Effect.promise(api.dispose))
+  const identityProvider = yield* IdentityProvider
+  const token = yield* identityProvider.issue({ sub: "user-123", scope: "read:me write:me" })
 
-  const callWhoami = (authorize: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) =>
-    Effect.gen(function*() {
-      const client = yield* HttpApiClient.make(Api, {
-        baseUrl: API,
-        transformClient: HttpClient.mapRequest(authorize)
-      })
-      return yield* client.me.whoami()
-    }).pipe(Effect.provide(network({ [API]: (request) => api.handler(request) })))
+  const user = yield* whoami(token)
+  yield* Effect.log(`Signed in as ${user.id} (${user.scopes.join(", ")})`)
 
-  const token = yield* auth.issueToken("user-123", "read:me write:me")
-  const user = yield* callWhoami(HttpClientRequest.bearerToken(token))
-  yield* Effect.log("authenticated as", user.id, user.scopes)
+  yield* whoami().pipe(
+    Effect.catchTag("Unauthorized", (error) => Effect.log(`Without a token: ${error.message}`))
+  )
 
-  const anonymous = yield* Effect.flip(callWhoami((request) => request))
-  yield* Effect.log("without a token:", anonymous._tag)
+  yield* whoami(Redacted.make("not.a.token")).pipe(
+    Effect.catchTag("Unauthorized", (error) => Effect.log(`With an invalid token: ${error.message}`))
+  )
+}).pipe(Effect.provide(ExampleLive))
 
-  const forged = yield* Effect.flip(callWhoami(HttpClientRequest.bearerToken("e30.e30.AAAA")))
-  yield* Effect.log("with a forged token:", forged._tag)
-
-  return { user: { id: user.id, scopes: user.scopes }, anonymous: anonymous._tag, forged: forged._tag }
-}).pipe(Effect.scoped, Effect.provide(CryptoLive))
-
-if (import.meta.main) Effect.runPromise(main)
+if (import.meta.main) NodeRuntime.runMain(main)
