@@ -14,5 +14,5 @@ const secret = new Uint8Array(32)
 
 import * as JsonWebEncryption from "effect/jose/JsonWebEncryption"
 
-const program = Effect.flatMap(JsonWebEncryption.encryptCompact("x", { key: secret, protectedHeader: { alg: "dir", enc: "A256GCM" } }), (jwe) => JsonWebEncryption.decryptCompact(jwe, secret))
-Effect.runPromise(Effect.provideService(program, Crypto.Crypto, crypto))
+const program = JsonWebEncryption.JsonWebEncryption.use((jwe) => Effect.flatMap(jwe.encryptCompact("x", { key: secret, protectedHeader: { alg: "dir", enc: "A256GCM" } }), (token) => jwe.decryptCompact(token, secret)))
+Effect.runPromise(program.pipe(Effect.provideServiceEffect(JsonWebEncryption.JsonWebEncryption, JsonWebEncryption.make), Effect.provideService(Crypto.Crypto, crypto)))

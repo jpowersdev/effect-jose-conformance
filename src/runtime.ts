@@ -23,18 +23,39 @@ export const WebCrypto: Crypto.Crypto = Crypto.make({
 
 export const CryptoLive = Layer.succeed(Crypto.Crypto, WebCrypto)
 
-/** Runs an effect that needs `Crypto`, returning its value or throwing its failure. */
-export const run = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Promise<A> =>
-  Effect.runPromiseExit(Effect.provide(effect, CryptoLive)).then((exit) => {
+/**
+ * The effect/jose services, built once with Web Crypto so the promise-based
+ * tests can call them directly.
+ */
+export const { keys, signatures, encryption, tokens, keySets } = Effect.runSync(
+  Effect.all({
+    keys: JsonWebKey.make,
+    signatures: JsonWebSignature.make,
+    encryption: JsonWebEncryption.make,
+    tokens: JsonWebToken.make,
+    keySets: JsonWebKeySet.make
+  }).pipe(Effect.provideService(Crypto.Crypto, WebCrypto))
+)
+
+/** Runs an effect, returning its value or throwing its failure. */
+export const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
+  Effect.runPromiseExit(effect).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
 
 /** Runs an effect producing a `Redacted` token and returns the token text, for handing to jose. */
-export const runToken = <E>(effect: Effect.Effect<Redacted.Redacted<string>, E, Crypto.Crypto>): Promise<string> =>
+export const runToken = <E>(effect: Effect.Effect<Redacted.Redacted<string>, E>): Promise<string> =>
   run(effect).then(Redacted.value)
 
-import { JsonWebAlgorithm } from "effect/jose"
+import {
+  JsonWebAlgorithm,
+  JsonWebEncryption,
+  JsonWebKey,
+  JsonWebKeySet,
+  JsonWebSignature,
+  JsonWebToken
+} from "effect/jose"
 
 /**
  * Every supported signature algorithm. Passing this as `algorithms` matches

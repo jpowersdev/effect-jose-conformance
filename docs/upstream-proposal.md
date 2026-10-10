@@ -79,14 +79,18 @@ platform layers.
 | `JsonWebEncryption` | Compact, flattened, and general JWE, including several recipients |
 | `JsonWebToken` | Signed and encrypted JWTs, claim validation, Schema-typed claims |
 
-Size: about 5,500 lines of source.
+Size: about 5,900 lines of source.
 
 ### API style
 
-Functions take options objects and return Effects requiring `Crypto`:
+Every module that performs key operations is a service, and its layer is what
+requires `Crypto`. The operations themselves take options objects and return
+Effects with no requirements of their own:
 
 ```ts
-const token = yield* JsonWebToken.sign({ role: "admin" }, {
+const jwt = yield* JsonWebToken.JsonWebToken
+
+const token = yield* jwt.sign({ role: "admin" }, {
   key: privateKey,
   protectedHeader: { alg: "ES256" },
   issuer: "urn:example:issuer",
@@ -94,13 +98,26 @@ const token = yield* JsonWebToken.sign({ role: "admin" }, {
   issuedAt: true
 })
 
-const { payload } = yield* JsonWebToken.verify(token, keySet, {
+const { payload } = yield* jwt.verify(token, keySet, {
   algorithms: ["ES256"],
   issuer: "urn:example:issuer",
   schema: Claims
 })
 ```
 
+`Crypto` is provided to the JOSE layers, not to the code that uses them:
+
+```ts
+const JoseLive = Layer.mergeAll(JsonWebToken.layer, JsonWebKeySet.layer).pipe(
+  Layer.provide(NodeCrypto.layer)
+)
+```
+
+- **Services:** `JsonWebKey`, `JsonWebSignature`, `JsonWebEncryption`,
+  `JsonWebToken`, and `JsonWebKeySet` each export the service, `make`, and
+  `layer`, following the core convention (as in `KeyValueStore`). Helpers that
+  need no key operations (`decodeProtectedHeader`, `decodeUnverified`,
+  `embeddedKey`), the schemas, brands, and errors remain plain module exports.
 - **Keys** may be a `Crypto.Key`, raw secret bytes, or a JWK. Verification and
   decryption also accept a key resolver, a function from headers to a key, which
   is how key sets plug in.
@@ -141,8 +158,10 @@ defect.
 
 ### Key sets
 
-- **`makeLocal` and `makeRemote`:** `makeRemote` fetches lazily, caches, and
-  refetches on an unknown `kid` after a cooldown. Concurrent fetches are
+- **`makeLocal` and `makeRemote`:** methods of the `JsonWebKeySet` service that
+  return key resolvers with no requirements. `makeRemote` needs `HttpClient`
+  when it is called, fetches lazily, caches, and refetches on an unknown `kid`
+  after a cooldown. Concurrent fetches are
   coalesced. Customizing the fetch (headers, retries, a different `fetch`) is done
   by providing a different `HttpClient`.
 - **Several matching keys** fail with `MultipleMatchingKeysError` unless the
@@ -152,8 +171,8 @@ defect.
   warming the cache at startup or refreshing on a schedule.
 - **Persistence across restarts:** `storage: "keyValueStore"` persists fetched
   sets in `KeyValueStore`, for example for serverless cold starts. Choosing it
-  adds `KeyValueStore` to the requirements at the type level; the default,
-  `"memory"`, does not.
+  adds `KeyValueStore` to `makeRemote`'s requirements at the type level; the
+  default, `"memory"`, does not.
 
 ### Key caching
 
@@ -207,7 +226,7 @@ A separate conformance repository pins the fork and tests it against
   192-bit AES) is asserted rather than skipped.
 - **Totals:** 533 tests on each server runtime and 1,596 in browsers, including a
   runnable end-to-end example. The fork
-  adds 89 unit tests and 7 type tests of its own, plus tests for the `Crypto` key
+  adds 89 unit tests and 10 type tests of its own, plus tests for the `Crypto` key
   operations.
 
 ## Intentional differences from jose
@@ -250,11 +269,16 @@ Each fails with a specific error, and tests pin that behaviour.
 5. **Cross-runtime testing:** should the conformance suite (or part of it) live in
    the Effect repository, or stay external?
 6. **Bundle size:** measured in [bundle-size.md](bundle-size.md). In an
-   application that already uses `Schema`, verifying a JWT adds 8.3 KB
+   application that already uses `Schema`, verifying a JWT adds 14.7 KB
    (gzipped), against 5.6 KB for `jose`. Without `Schema` in the application it
-   adds 19.8 KB, mostly `Schema` itself, because errors are
+   adds 26.2 KB, mostly `Schema` itself, because errors are
    `Schema.TaggedError`s. Is that trade-off acceptable, or should errors use
    `Data.TaggedError`?
+7. **Service granularity:** because the operations are service methods, an
+   application bundles every method of the services it uses. About 6 KB of
+   the JWT figure is signing and JWE code that a verify-only application never
+   calls. Should encrypted JWTs be a separate service, or should the services
+   be split further?
 
 ## Suggested PR plan
 

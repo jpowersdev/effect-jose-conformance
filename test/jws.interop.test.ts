@@ -2,7 +2,7 @@ import * as jose from "jose"
 import { JsonWebKey, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
-import { run, runToken, anySignatureAlgorithm } from "../src/runtime.ts"
+import { anySignatureAlgorithm, keys, run, runToken, signatures } from "../src/runtime.ts"
 
 const algorithms = [
   "HS256", "HS384", "HS512",
@@ -17,64 +17,64 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 
 describe.each(algorithms)("JWS %s", (alg) => {
   it("effect signs (compact) → jose verifies", async () => {
-    const keys = await keysFor(alg)
-    const jws = await runToken(JsonWebSignature.signCompact(payload, {
-      key: keys.signOrEncrypt.jwk as any,
+    const material = await keysFor(alg)
+    const jws = await runToken(signatures.signCompact(payload, {
+      key: material.signOrEncrypt.jwk as any,
       protectedHeader: { alg, kid: "k1" }
     }))
-    const verified = await jose.compactVerify(jws, keys.verifyOrDecrypt.jose as any, { algorithms: [alg] })
+    const verified = await jose.compactVerify(jws, material.verifyOrDecrypt.jose as any, { algorithms: [alg] })
     expect(decode(verified.payload)).toBe(decode(payload))
     expect(verified.protectedHeader).toEqual({ alg, kid: "k1" })
   })
 
   it("jose signs (compact) → effect verifies", async () => {
-    const keys = await keysFor(alg)
+    const material = await keysFor(alg)
     const jws = await new jose.CompactSign(payload).setProtectedHeader({ alg, typ: "JOSE" }).sign(
-      keys.signOrEncrypt.jose as any
+      material.signOrEncrypt.jose as any
     )
-    const verified = await run(JsonWebSignature.verifyCompact(jws, keys.verifyOrDecrypt.jwk as any, { algorithms: [alg] }))
+    const verified = await run(signatures.verifyCompact(jws, material.verifyOrDecrypt.jwk as any, { algorithms: [alg] }))
     expect(decode(verified.payload)).toBe(decode(payload))
     expect(verified.protectedHeader).toEqual({ alg, typ: "JOSE" })
   })
 
   it("effect signs with an imported Crypto.Key → jose verifies", async () => {
-    const keys = await keysFor(alg)
-    const key = keys.signOrEncrypt.jwk instanceof Uint8Array
-      ? keys.signOrEncrypt.jwk
-      : await run(JsonWebKey.importJwk(keys.signOrEncrypt.jwk as any, alg))
-    const jws = await runToken(JsonWebSignature.signCompact(payload, { key, protectedHeader: { alg } }))
-    await jose.compactVerify(jws, keys.verifyOrDecrypt.jose as any)
+    const material = await keysFor(alg)
+    const key = material.signOrEncrypt.jwk instanceof Uint8Array
+      ? material.signOrEncrypt.jwk
+      : await run(keys.importJwk(material.signOrEncrypt.jwk as any, alg))
+    const jws = await runToken(signatures.signCompact(payload, { key, protectedHeader: { alg } }))
+    await jose.compactVerify(jws, material.verifyOrDecrypt.jose as any)
   })
 
   it("flattened JSON with protected + unprotected headers round-trips both ways", async () => {
-    const keys = await keysFor(alg)
-    const ours = await run(JsonWebSignature.signFlattened(payload, {
-      key: keys.signOrEncrypt.jwk as any,
+    const material = await keysFor(alg)
+    const ours = await run(signatures.signFlattened(payload, {
+      key: material.signOrEncrypt.jwk as any,
       protectedHeader: { alg },
       unprotectedHeader: { kid: "u1" }
     }))
-    const theirs = await jose.flattenedVerify(ours as any, keys.verifyOrDecrypt.jose as any)
+    const theirs = await jose.flattenedVerify(ours as any, material.verifyOrDecrypt.jose as any)
     expect(theirs.unprotectedHeader).toEqual({ kid: "u1" })
     const joseJws = await new jose.FlattenedSign(payload).setProtectedHeader({ alg }).setUnprotectedHeader({
       kid: "u2"
-    }).sign(keys.signOrEncrypt.jose as any)
-    const verified = await run(JsonWebSignature.verifyFlattened(joseJws as any, keys.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
+    }).sign(material.signOrEncrypt.jose as any)
+    const verified = await run(signatures.verifyFlattened(joseJws as any, material.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
     expect(verified.unprotectedHeader).toEqual({ kid: "u2" })
   })
 
   it("unencoded payload (RFC 7797, b64:false) round-trips both ways", async () => {
-    const keys = await keysFor(alg)
+    const material = await keysFor(alg)
     const header = { alg, b64: false, crit: ["b64"] }
-    const ours = await run(JsonWebSignature.signFlattened("$.02", { key: keys.signOrEncrypt.jwk as any, protectedHeader: header }))
+    const ours = await run(signatures.signFlattened("$.02", { key: material.signOrEncrypt.jwk as any, protectedHeader: header }))
     expect(ours.payload).toBe("$.02")
-    await jose.flattenedVerify(ours as any, keys.verifyOrDecrypt.jose as any)
+    await jose.flattenedVerify(ours as any, material.verifyOrDecrypt.jose as any)
     const joseJws = await new jose.FlattenedSign(new TextEncoder().encode("$.02")).setProtectedHeader(header).sign(
-      keys.signOrEncrypt.jose as any
+      material.signOrEncrypt.jose as any
     )
     // jose emits unencoded payloads detached (payload: ""); supply it for verification.
     expect(joseJws.payload).toBe("")
     const verified = await run(
-      JsonWebSignature.verifyFlattened({ ...joseJws, payload: "$.02" } as any, keys.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm })
+      signatures.verifyFlattened({ ...joseJws, payload: "$.02" } as any, material.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm })
     )
     expect(decode(verified.payload)).toBe("$.02")
   })
@@ -83,7 +83,7 @@ describe.each(algorithms)("JWS %s", (alg) => {
 describe("JWS general JSON serialization", () => {
   it("multiple signers (HS256 + ES256 + EdDSA) interoperate both ways", async () => {
     const [hs, es, ed] = await Promise.all([keysFor("HS256"), keysFor("ES256"), keysFor("EdDSA")])
-    const ours = await run(JsonWebSignature.signGeneral(payload, [
+    const ours = await run(signatures.signGeneral(payload, [
       { key: hs.signOrEncrypt.jwk as any, protectedHeader: { alg: "HS256" } },
       { key: es.signOrEncrypt.jwk as any, protectedHeader: { alg: "ES256" }, unprotectedHeader: { kid: "es" } },
       { key: ed.signOrEncrypt.jwk as any, protectedHeader: { alg: "EdDSA" } }
@@ -96,6 +96,6 @@ describe("JWS general JSON serialization", () => {
     sign.addSignature(es.signOrEncrypt.jose as any).setProtectedHeader({ alg: "ES256" })
     sign.addSignature(ed.signOrEncrypt.jose as any).setProtectedHeader({ alg: "EdDSA" })
     const theirs = await sign.sign()
-    for (const k of [hs, es, ed]) await run(JsonWebSignature.verifyGeneral(theirs as any, k.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
+    for (const k of [hs, es, ed]) await run(signatures.verifyGeneral(theirs as any, k.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
   })
 })

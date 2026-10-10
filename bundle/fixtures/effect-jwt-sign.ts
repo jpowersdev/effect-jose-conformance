@@ -14,4 +14,5 @@ const secret = new Uint8Array(32)
 
 import * as JsonWebToken from "effect/jose/JsonWebToken"
 
-Effect.runPromise(Effect.provideService(JsonWebToken.sign({ sub: "u" }, { key: secret, protectedHeader: { alg: "HS256" }, expirationTime: "1 hour" }), Crypto.Crypto, crypto))
+const program = JsonWebToken.JsonWebToken.use((jwt) => jwt.sign({ sub: "u" }, { key: secret, protectedHeader: { alg: "HS256" }, expirationTime: "1 hour" }))
+Effect.runPromise(program.pipe(Effect.provideServiceEffect(JsonWebToken.JsonWebToken, JsonWebToken.make), Effect.provideService(Crypto.Crypto, crypto)))

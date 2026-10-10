@@ -22,4 +22,5 @@ Effect.runPromise(Effect.provideService(program, Crypto.Crypto, crypto))
 
 import * as JsonWebToken from "effect/jose/JsonWebToken"
 declare const token: string
-Effect.runPromise(Effect.provideService(JsonWebToken.verify(token, new Uint8Array(32), { algorithms: ["HS256"] }), Crypto.Crypto, crypto))
+const verify = JsonWebToken.JsonWebToken.use((jwt) => jwt.verify(token, new Uint8Array(32), { algorithms: ["HS256"] }))
+Effect.runPromise(verify.pipe(Effect.provideServiceEffect(JsonWebToken.JsonWebToken, JsonWebToken.make), Effect.provideService(Crypto.Crypto, crypto)))

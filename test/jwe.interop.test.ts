@@ -5,7 +5,7 @@ import { keysFor } from "../src/keys.ts"
 import { aes192Supported, usesAes192 } from "../src/capabilities.ts"
 import { settle, tagged } from "../src/outcome.ts"
 import vectors from "./fixtures/aes192-vectors.json" with { type: "json" }
-import { run, runToken } from "../src/runtime.ts"
+import { encryption, run, runToken } from "../src/runtime.ts"
 
 const keyManagement = [
   "dir",
@@ -38,7 +38,7 @@ describe.each(cases)("JWE %s + %s", (alg, enc) => {
       : alg.startsWith("PBES2")
       ? new TextEncoder().encode("password")
       : new Uint8Array(Number(alg.slice(1, 4)) / 8)
-    const ours = await tagged(runToken(JsonWebEncryption.encryptCompact(plaintext, { key: key as any, protectedHeader: { alg, enc } })))
+    const ours = await tagged(runToken(encryption.encryptCompact(plaintext, { key: key as any, protectedHeader: { alg, enc } })))
     expect(ours).toBe("UnsupportedAlgorithmError")
     // jose fails too, but with the runtime's raw exception rather than a jose error.
     const theirs = await settle(new jose.CompactEncrypt(plaintext).setProtectedHeader({ alg, enc }).encrypt(key as any))
@@ -50,7 +50,7 @@ describe.each(cases)("JWE %s + %s", (alg, enc) => {
     if (await aes192Supported) return skip("runtime supports 192-bit AES")
     const vector = (vectors as Record<string, { token: string; key: unknown }>)[`${alg}+${enc}`]
     const key = vector.key
-    const ours = await tagged(run(JsonWebEncryption.decryptCompact(vector.token, key as any, allow)))
+    const ours = await tagged(run(encryption.decryptCompact(vector.token, key as any, allow)))
     expect(ours).toBe("UnsupportedAlgorithmError")
     const theirs = await settle(jose.compactDecrypt(vector.token, key as any, allow))
     expect(theirs.ok).toBe(false)
@@ -58,39 +58,39 @@ describe.each(cases)("JWE %s + %s", (alg, enc) => {
 
   it("effect encrypts (compact) → jose decrypts", async ({ skip }) => {
     if (usesAes192(alg, enc) && !(await aes192Supported)) return skip("runtime lacks 192-bit AES")
-    const keys = await keysFor(alg, { enc })
-    const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
-      key: keys.signOrEncrypt.jwk as any,
+    const material = await keysFor(alg, { enc })
+    const jwe = await runToken(encryption.encryptCompact(plaintext, {
+      key: material.signOrEncrypt.jwk as any,
       protectedHeader: { alg, enc, kid: "k1" }
     }))
-    const out = await jose.compactDecrypt(jwe, keys.verifyOrDecrypt.jose as any, allow)
+    const out = await jose.compactDecrypt(jwe, material.verifyOrDecrypt.jose as any, allow)
     expect(decode(out.plaintext)).toBe(decode(plaintext))
     expect(out.protectedHeader.kid).toBe("k1")
   })
 
   it("jose encrypts (compact) → effect decrypts", async ({ skip }) => {
     if (usesAes192(alg, enc) && !(await aes192Supported)) return skip("runtime lacks 192-bit AES")
-    const keys = await keysFor(alg, { enc })
+    const material = await keysFor(alg, { enc })
     const jwe = await new jose.CompactEncrypt(plaintext).setProtectedHeader({ alg, enc }).encrypt(
-      keys.signOrEncrypt.jose as any
+      material.signOrEncrypt.jose as any
     )
-    const out = await run(JsonWebEncryption.decryptCompact(jwe, keys.verifyOrDecrypt.jwk as any, allow))
+    const out = await run(encryption.decryptCompact(jwe, material.verifyOrDecrypt.jwk as any, allow))
     expect(decode(out.plaintext)).toBe(decode(plaintext))
   })
 })
 
 describe("JWE flattened and general serializations", () => {
   it("flattened with AAD and all three header kinds interoperates both ways", async () => {
-    const keys = await keysFor("ECDH-ES+A256KW")
+    const material = await keysFor("ECDH-ES+A256KW")
     const aad = new TextEncoder().encode("additional data")
-    const ours = await run(JsonWebEncryption.encryptFlattened(plaintext, {
-      key: keys.signOrEncrypt.jwk as any,
+    const ours = await run(encryption.encryptFlattened(plaintext, {
+      key: material.signOrEncrypt.jwk as any,
       protectedHeader: { enc: "A256GCM" },
       sharedUnprotectedHeader: { alg: "ECDH-ES+A256KW" },
       unprotectedHeader: { kid: "r1" },
       additionalAuthenticatedData: aad
     }))
-    const theirs = await jose.flattenedDecrypt(ours as any, keys.verifyOrDecrypt.jose as any)
+    const theirs = await jose.flattenedDecrypt(ours as any, material.verifyOrDecrypt.jose as any)
     expect(decode(theirs.plaintext)).toBe(decode(plaintext))
     expect(decode(theirs.additionalAuthenticatedData!)).toBe("additional data")
 
@@ -99,8 +99,8 @@ describe("JWE flattened and general serializations", () => {
       .setSharedUnprotectedHeader({ alg: "ECDH-ES+A256KW" })
       .setUnprotectedHeader({ kid: "r2" })
       .setAdditionalAuthenticatedData(aad)
-      .encrypt(keys.signOrEncrypt.jose as any)
-    const out = await run(JsonWebEncryption.decryptFlattened(joseJwe as any, keys.verifyOrDecrypt.jwk as any))
+      .encrypt(material.signOrEncrypt.jose as any)
+    const out = await run(encryption.decryptFlattened(joseJwe as any, material.verifyOrDecrypt.jwk as any))
     expect(decode(out.plaintext)).toBe(decode(plaintext))
     expect(out.unprotectedHeader).toEqual({ kid: "r2" })
   })
@@ -112,7 +112,7 @@ describe("JWE flattened and general serializations", () => {
       [ecdh, "ECDH-ES+A128KW"],
       [kw, "A256KW"]
     ] as const
-    const ours = await run(JsonWebEncryption.encryptGeneral(plaintext, {
+    const ours = await run(encryption.encryptGeneral(plaintext, {
       protectedHeader: { enc: "A128CBC-HS256" },
       recipients: recipients.map(([k, alg]) => ({ key: k.signOrEncrypt.jwk as any, unprotectedHeader: { alg } }))
     }))
@@ -126,22 +126,22 @@ describe("JWE flattened and general serializations", () => {
     for (const [k, alg] of recipients) encrypt.addRecipient(k.signOrEncrypt.jose as any).setUnprotectedHeader({ alg })
     const theirs = await encrypt.encrypt()
     for (const [k] of recipients) {
-      const out = await run(JsonWebEncryption.decryptGeneral(theirs as any, k.verifyOrDecrypt.jwk as any))
+      const out = await run(encryption.decryptGeneral(theirs as any, k.verifyOrDecrypt.jwk as any))
       expect(decode(out.plaintext)).toBe(decode(plaintext))
     }
   })
 
   it("ECDH-ES works over every supported curve both ways", async () => {
     for (const crv of ["P-256", "P-384", "P-521", "X25519"]) {
-      const keys = await keysFor("ECDH-ES", { crv })
-      const jwe = await runToken(JsonWebEncryption.encryptCompact(plaintext, {
-        key: keys.signOrEncrypt.jwk as any,
+      const material = await keysFor("ECDH-ES", { crv })
+      const jwe = await runToken(encryption.encryptCompact(plaintext, {
+        key: material.signOrEncrypt.jwk as any,
         protectedHeader: { alg: "ECDH-ES", enc: "A256GCM" }
       }))
-      await jose.compactDecrypt(jwe, keys.verifyOrDecrypt.jose as any)
+      await jose.compactDecrypt(jwe, material.verifyOrDecrypt.jose as any)
       const joseJwe = await new jose.CompactEncrypt(plaintext).setProtectedHeader({ alg: "ECDH-ES", enc: "A256GCM" })
-        .encrypt(keys.signOrEncrypt.jose as any)
-      await run(JsonWebEncryption.decryptCompact(joseJwe, keys.verifyOrDecrypt.jwk as any))
+        .encrypt(material.signOrEncrypt.jose as any)
+      await run(encryption.decryptCompact(joseJwe, material.verifyOrDecrypt.jwk as any))
     }
   })
 })

@@ -13,7 +13,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
-import { Context, Crypto, Effect, Layer, Redacted, Schema } from "effect"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter } from "effect/http"
 import {
   HttpApi,
@@ -82,19 +82,19 @@ class AccessTokens extends Context.Service<
     readonly verify: (token: Redacted.Redacted<string>) => Effect.Effect<User, Unauthorized>
   }
 >()("example/AccessTokens") {
-  /** The service, with its `HttpClient` and `Crypto` left to the caller. */
+  /** The service, with the JOSE services and `HttpClient` left to the caller. */
   static readonly layerNoDeps = Layer.effect(
     AccessTokens,
     Effect.gen(function*() {
-      // Captured once, so `verify` has no requirements of its own.
-      const crypto = yield* Crypto.Crypto
-      const keys = yield* JsonWebKeySet.makeRemote(`${ISSUER}/.well-known/jwks.json`)
+      const jwt = yield* JsonWebToken.JsonWebToken
+      const keySets = yield* JsonWebKeySet.JsonWebKeySet
+      const keySet = yield* keySets.makeRemote(`${ISSUER}/.well-known/jwks.json`)
       // Fetch the key set while starting up, rather than on the first request.
-      yield* keys.refresh
+      yield* keySet.refresh
 
       const verify = Effect.fn("AccessTokens.verify")(
         function*(token: Redacted.Redacted<string>) {
-          const { payload } = yield* JsonWebToken.verify(token, keys, {
+          const { payload } = yield* jwt.verify(token, keySet, {
             schema: AccessTokenClaims,
             algorithms: ["ES256"],
             issuer: ISSUER,
@@ -103,8 +103,7 @@ class AccessTokens extends Context.Service<
           return new User({ id: payload.sub, scopes: payload.scope.split(" ") })
         },
         Effect.tapError((error) => Effect.logWarning(`Rejected access token: ${error._tag}`)),
-        Effect.mapError(() => new Unauthorized({ message: "Invalid access token" })),
-        Effect.provideService(Crypto.Crypto, crypto)
+        Effect.mapError(() => new Unauthorized({ message: "Invalid access token" }))
       )
 
       return AccessTokens.of({ verify })
@@ -113,7 +112,10 @@ class AccessTokens extends Context.Service<
 
   /** The service, reaching the identity provider over HTTPS. */
   static readonly layer = AccessTokens.layerNoDeps.pipe(
-    Layer.provide([FetchHttpClient.layer, NodeCrypto.layer])
+    Layer.provide([
+      Layer.mergeAll(JsonWebToken.layer, JsonWebKeySet.layer).pipe(Layer.provide(NodeCrypto.layer)),
+      FetchHttpClient.layer
+    ])
   )
 }
 
@@ -185,25 +187,21 @@ class IdentityProvider extends Context.Service<
   static readonly layer = Layer.effect(
     IdentityProvider,
     Effect.gen(function*() {
-      // Captured once, so `issue` has no requirements of its own.
-      const crypto = yield* Crypto.Crypto
-      const { privateKey, publicKey } = yield* JsonWebKey.generateKeyPair("ES256")
-      const kid = yield* JsonWebKey.thumbprint(publicKey)
-      const publicJwk = yield* JsonWebKey.exportJwk(publicKey)
+      const keys = yield* JsonWebKey.JsonWebKey
+      const jwt = yield* JsonWebToken.JsonWebToken
+      const { privateKey, publicKey } = yield* keys.generateKeyPair("ES256")
+      const kid = yield* keys.thumbprint(publicKey)
+      const publicJwk = yield* keys.exportJwk(publicKey)
       const jwks = { keys: [{ ...publicJwk, kid, use: "sig", alg: "ES256" }] }
 
-      const issue = Effect.fn("IdentityProvider.issue")(
-        function*(claims: { readonly sub: string; readonly scope: string }) {
-          return yield* JsonWebToken.sign(claims, {
-            key: privateKey,
-            protectedHeader: { alg: "ES256", kid },
-            issuer: ISSUER,
-            audience: AUDIENCE,
-            expirationTime: "5 minutes"
-          })
-        },
-        Effect.provideService(Crypto.Crypto, crypto)
-      )
+      const issue = (claims: { readonly sub: string; readonly scope: string }) =>
+        jwt.sign(claims, {
+          key: privateKey,
+          protectedHeader: { alg: "ES256", kid },
+          issuer: ISSUER,
+          audience: AUDIENCE,
+          expirationTime: "5 minutes"
+        })
 
       const jwksClient = HttpClient.make((request) =>
         Effect.succeed(HttpClientResponse.fromWeb(
@@ -234,7 +232,9 @@ const ExampleLive = HttpRouter.serve(ApiLive, { disableLogger: true, disableList
   Layer.provide(AccessTokens.layerNoDeps.pipe(Layer.provide(IdentityProvider.layerHttpClient))),
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provideMerge(IdentityProvider.layer),
-  Layer.provide(NodeCrypto.layer)
+  Layer.provide(
+    Layer.mergeAll(JsonWebKey.layer, JsonWebKeySet.layer, JsonWebToken.layer).pipe(Layer.provide(NodeCrypto.layer))
+  )
 )
 
 export const main = Effect.gen(function*() {

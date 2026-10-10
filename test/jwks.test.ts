@@ -7,7 +7,7 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { jwksEndpoint } from "../src/jwksEndpoint.ts"
 import { keysFor, type KeyMaterial } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run, anySignatureAlgorithm } from "../src/runtime.ts"
+import { anySignatureAlgorithm, keySets, run, signatures, tokens } from "../src/runtime.ts"
 
 const payload = new TextEncoder().encode("payload")
 
@@ -50,14 +50,14 @@ describe("local JWKS selection matches jose", () => {
   it.each(scenarios)("%s", async (_, makeToken) => {
     const token = await makeToken()
     const joseOutcome = await settle(jose.compactVerify(token, jose.createLocalJWKSet(jwks)))
-    const effectOutcome = await settle(run(Effect.flatMap(JsonWebKeySet.makeLocal(jwks as any), (resolver) =>
-      JsonWebSignature.verifyCompact(token, resolver, { algorithms: anySignatureAlgorithm }))))
+    const effectOutcome = await settle(run(Effect.flatMap(keySets.makeLocal(jwks as any), (resolver) =>
+      signatures.verifyCompact(token, resolver, { algorithms: anySignatureAlgorithm }))))
     expect(effectOutcome).toEqual(joseOutcome)
   })
 
   it("malformed key sets are rejected", async () => {
     for (const bad of [{}, { keys: "x" }, { keys: [1] }]) {
-      const ours = await settle(run(JsonWebKeySet.makeLocal(bad as any)))
+      const ours = await settle(run(keySets.makeLocal(bad as any)))
       let theirs: Awaited<ReturnType<typeof settle>>
       try {
         jose.createLocalJWKSet(bad as any)
@@ -69,10 +69,10 @@ describe("local JWKS selection matches jose", () => {
     }
   })
 
-  it("works as the key for JsonWebToken.verify", async () => {
+  it("works as the key for tokens.verify", async () => {
     const token = await new jose.SignJWT({ sub: "u" }).setProtectedHeader({ alg: "ES256", kid: "es-1" }).sign(es1.signOrEncrypt.jose as any)
-    const result = await run(Effect.flatMap(JsonWebKeySet.makeLocal(jwks as any), (resolver) =>
-      JsonWebToken.verify(token, resolver, { requireExpiration: false, algorithms: ["ES256"] })))
+    const result = await run(Effect.flatMap(keySets.makeLocal(jwks as any), (resolver) =>
+      tokens.verify(token, resolver, { requireExpiration: false, algorithms: ["ES256"] })))
     expect(result.payload.sub).toBe("u")
   })
 })
@@ -91,15 +91,15 @@ describe("remote JWKS", () => {
     const requests = Effect.promise(endpoint.count)
 
     const program = Effect.gen(function*() {
-      const resolver = yield* JsonWebKeySet.makeRemote(endpoint.url, {
+      const resolver = yield* keySets.makeRemote(endpoint.url, {
         allowInsecureHttp: true, // the shared test server is plain HTTP
         cooldownDuration: "30 seconds",
         cacheMaxAge: "10 minutes"
       })
       const counts: Array<number> = []
       counts.push(yield* requests) // lazily: nothing fetched yet
-      yield* JsonWebSignature.verifyCompact(tokenA, resolver, { algorithms: anySignatureAlgorithm })
-      yield* JsonWebSignature.verifyCompact(tokenA, resolver, { algorithms: anySignatureAlgorithm })
+      yield* signatures.verifyCompact(tokenA, resolver, { algorithms: anySignatureAlgorithm })
+      yield* signatures.verifyCompact(tokenA, resolver, { algorithms: anySignatureAlgorithm })
       counts.push(yield* requests) // one fetch, then cached
       yield* Effect.promise(() =>
         endpoint.set({
@@ -109,13 +109,13 @@ describe("remote JWKS", () => {
           ]
         })
       )
-      const cooling = yield* Effect.result(JsonWebSignature.verifyCompact(tokenB, resolver, { algorithms: anySignatureAlgorithm }))
+      const cooling = yield* Effect.result(signatures.verifyCompact(tokenB, resolver, { algorithms: anySignatureAlgorithm }))
       counts.push(yield* requests) // within cooldown: no refetch
       yield* TestClock.adjust("31 seconds")
-      yield* JsonWebSignature.verifyCompact(tokenB, resolver, { algorithms: anySignatureAlgorithm })
+      yield* signatures.verifyCompact(tokenB, resolver, { algorithms: anySignatureAlgorithm })
       counts.push(yield* requests) // after cooldown: refetched once, kid "b" now found
       yield* TestClock.adjust("11 minutes")
-      yield* JsonWebSignature.verifyCompact(tokenA, resolver, { algorithms: anySignatureAlgorithm })
+      yield* signatures.verifyCompact(tokenA, resolver, { algorithms: anySignatureAlgorithm })
       counts.push(yield* requests) // stale cache: refetched
       return { counts, cooling }
     }).pipe(Effect.provide([FetchHttpClient.layer, TestClock.layer()]))
@@ -129,8 +129,8 @@ describe("remote JWKS", () => {
     const endpoint = await jwksEndpoint()
     const tokenA = await signed(a, { alg: "ES256", kid: "a" })
     const outcome = await settle(run(Effect.gen(function*() {
-      const resolver = yield* JsonWebKeySet.makeRemote(endpoint.failUrl, { allowInsecureHttp: true })
-      return yield* JsonWebSignature.verifyCompact(tokenA, resolver, { algorithms: anySignatureAlgorithm })
+      const resolver = yield* keySets.makeRemote(endpoint.failUrl, { allowInsecureHttp: true })
+      return yield* signatures.verifyCompact(tokenA, resolver, { algorithms: anySignatureAlgorithm })
     }).pipe(Effect.provide(FetchHttpClient.layer))))
     expect(outcome).toEqual({ ok: false, code: "ERR_JOSE_GENERIC" })
     expect(await settle(jose.compactVerify(tokenA, jose.createRemoteJWKSet(new URL(endpoint.failUrl))))).toEqual(outcome)

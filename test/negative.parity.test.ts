@@ -3,7 +3,7 @@ import { JsonWebEncryption, JsonWebSignature } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run, runToken, anySignatureAlgorithm } from "../src/runtime.ts"
+import { anySignatureAlgorithm, encryption, run, runToken, signatures } from "../src/runtime.ts"
 
 const enc = new TextEncoder()
 const b64u = (s: string | Uint8Array) => jose.base64url.encode(s)
@@ -46,7 +46,7 @@ describe("JWS compact verification failures match jose", () => {
     // Both libraries get the same allow list of every supported algorithm.
     await same(
       () => jose.compactVerify(token, secret, { algorithms: [...anySignatureAlgorithm] }),
-      () => run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm }))
+      () => run(signatures.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm }))
     )
   })
 
@@ -54,7 +54,7 @@ describe("JWS compact verification failures match jose", () => {
     const token = await hs256()
     const outcome = await same(
       () => jose.compactVerify(token, secret, { algorithms: ["HS512"] }),
-      () => run(JsonWebSignature.verifyCompact(token, secret, { algorithms: ["HS512"] }))
+      () => run(signatures.verifyCompact(token, secret, { algorithms: ["HS512"] }))
     )
     expect(outcome).toEqual({ ok: false, code: "ERR_JOSE_ALG_NOT_ALLOWED" })
   })
@@ -65,11 +65,11 @@ describe("JWS compact verification failures match jose", () => {
     // Both libraries get the same allow list of every supported algorithm.
     await same(
       () => jose.compactVerify(token, secret, { algorithms: [...anySignatureAlgorithm] }),
-      () => run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm }))
+      () => run(signatures.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm }))
     )
     const ok = await same(
       () => jose.compactVerify(token, secret, { crit: { "urn:x": true } }),
-      () => run(JsonWebSignature.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm, crit: { "urn:x": true } }))
+      () => run(signatures.verifyCompact(token, secret, { algorithms: anySignatureAlgorithm, crit: { "urn:x": true } }))
     )
     expect(ok).toEqual({ ok: true })
   })
@@ -86,41 +86,41 @@ describe("key misuse matches jose", () => {
     const { key_ops: _, ext: __, alg: ___, ...privateJwk } = jwk as any
     await same(
       () => new jose.CompactSign(payload).setProtectedHeader({ alg: "RS256" }).sign(privateJwk),
-      () => runToken(JsonWebSignature.signCompact(payload, { key: privateJwk, protectedHeader: { alg: "RS256" } }))
+      () => runToken(signatures.signCompact(payload, { key: privateJwk, protectedHeader: { alg: "RS256" } }))
     )
   })
 
   it("public JWK cannot sign; private JWK cannot verify", async () => {
-    const keys = await keysFor("ES256")
+    const material = await keysFor("ES256")
     await same(
-      () => new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.verifyOrDecrypt.jwk as any),
-      () => runToken(JsonWebSignature.signCompact(payload, { key: keys.verifyOrDecrypt.jwk as any, protectedHeader: { alg: "ES256" } }))
+      () => new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(material.verifyOrDecrypt.jwk as any),
+      () => runToken(signatures.signCompact(payload, { key: material.verifyOrDecrypt.jwk as any, protectedHeader: { alg: "ES256" } }))
     )
-    const token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.signOrEncrypt.jose as any)
+    const token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(material.signOrEncrypt.jose as any)
     await same(
-      () => jose.compactVerify(token, keys.signOrEncrypt.jwk as any),
-      () => run(JsonWebSignature.verifyCompact(token, keys.signOrEncrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
+      () => jose.compactVerify(token, material.signOrEncrypt.jwk as any),
+      () => run(signatures.verifyCompact(token, material.signOrEncrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
     )
   })
 
   it("JWK alg / use / key_ops constraints are enforced", async () => {
-    const keys = await keysFor("ES256")
-    const token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.signOrEncrypt.jose as any)
-    const pub = keys.verifyOrDecrypt.jwk as jose.JWK
+    const material = await keysFor("ES256")
+    const token = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(material.signOrEncrypt.jose as any)
+    const pub = material.verifyOrDecrypt.jwk as jose.JWK
     for (const jwk of [{ ...pub, alg: "ES384" }, { ...pub, use: "enc" }, { ...pub, key_ops: ["encrypt"] }, { ...pub, alg: "ES256", use: "sig", key_ops: ["verify"] }]) {
-      await same(() => jose.compactVerify(token, jwk), () => run(JsonWebSignature.verifyCompact(token, jwk as any, { algorithms: anySignatureAlgorithm })))
+      await same(() => jose.compactVerify(token, jwk), () => run(signatures.verifyCompact(token, jwk as any, { algorithms: anySignatureAlgorithm })))
     }
   })
 
   it("key type confusion: HMAC secret where ES256 expected; EC key with HS256 header", async () => {
-    const keys = await keysFor("ES256")
-    const esToken = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(keys.signOrEncrypt.jose as any)
-    await same(() => jose.compactVerify(esToken, secret), () => run(JsonWebSignature.verifyCompact(esToken, secret, { algorithms: anySignatureAlgorithm })))
+    const material = await keysFor("ES256")
+    const esToken = await new jose.CompactSign(payload).setProtectedHeader({ alg: "ES256" }).sign(material.signOrEncrypt.jose as any)
+    await same(() => jose.compactVerify(esToken, secret), () => run(signatures.verifyCompact(esToken, secret, { algorithms: anySignatureAlgorithm })))
     // Classic algorithm-confusion attack: an HS256 token "signed" with the public key's bytes.
-    const forged = await new jose.CompactSign(payload).setProtectedHeader({ alg: "HS256" }).sign(enc.encode(JSON.stringify(keys.verifyOrDecrypt.jwk)))
+    const forged = await new jose.CompactSign(payload).setProtectedHeader({ alg: "HS256" }).sign(enc.encode(JSON.stringify(material.verifyOrDecrypt.jwk)))
     const outcome = await same(
-      () => jose.compactVerify(forged, keys.verifyOrDecrypt.jwk as any),
-      () => run(JsonWebSignature.verifyCompact(forged, keys.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
+      () => jose.compactVerify(forged, material.verifyOrDecrypt.jwk as any),
+      () => run(signatures.verifyCompact(forged, material.verifyOrDecrypt.jwk as any, { algorithms: anySignatureAlgorithm }))
     )
     expect(outcome.ok).toBe(false)
   })
@@ -152,18 +152,18 @@ describe("JWE decryption failures match jose", () => {
   it.each(mutations)("%s", async (_, mutate) => {
     const { kek, token } = await encryptA256KW()
     const mutated = mutate(token.split("."))
-    await same(() => jose.compactDecrypt(mutated, kek), () => run(JsonWebEncryption.decryptCompact(mutated, kek)))
+    await same(() => jose.compactDecrypt(mutated, kek), () => run(encryption.decryptCompact(mutated, kek)))
   })
 
   it("PBES2 is rejected unless explicitly allowed, and p2c is bounded", async () => {
     const password = enc.encode("pw")
     const token = await new jose.CompactEncrypt(payload).setProtectedHeader({ alg: "PBES2-HS256+A128KW", enc: "A128GCM" })
       .setKeyManagementParameters({ p2c: 20_000 }).encrypt(password)
-    await same(() => jose.compactDecrypt(token, password), () => run(JsonWebEncryption.decryptCompact(token, password)))
+    await same(() => jose.compactDecrypt(token, password), () => run(encryption.decryptCompact(token, password)))
     const allow = { keyManagementAlgorithms: ["PBES2-HS256+A128KW" as const] }
-    await same(() => jose.compactDecrypt(token, password, allow), () => run(JsonWebEncryption.decryptCompact(token, password, allow)))
+    await same(() => jose.compactDecrypt(token, password, allow), () => run(encryption.decryptCompact(token, password, allow)))
     const raised = { ...allow, maxPBES2Count: 30_000 }
-    const ok = await same(() => jose.compactDecrypt(token, password, raised), () => run(JsonWebEncryption.decryptCompact(token, password, raised)))
+    const ok = await same(() => jose.compactDecrypt(token, password, raised), () => run(encryption.decryptCompact(token, password, raised)))
     expect(ok).toEqual({ ok: true })
   })
 
@@ -173,7 +173,7 @@ describe("JWE decryption failures match jose", () => {
       .encrypt(a.signOrEncrypt.jose as any)
     const outcome = await same(
       () => jose.compactDecrypt(token, b.verifyOrDecrypt.jose as any),
-      () => run(JsonWebEncryption.decryptCompact(token, b.verifyOrDecrypt.jwk as any))
+      () => run(encryption.decryptCompact(token, b.verifyOrDecrypt.jwk as any))
     )
     expect(outcome).toEqual({ ok: false, code: "ERR_JWE_DECRYPTION_FAILED" })
   })
@@ -181,20 +181,20 @@ describe("JWE decryption failures match jose", () => {
   it("enc allow list rejects", async () => {
     const { kek, token } = await encryptA256KW()
     const opts = { contentEncryptionAlgorithms: ["A128GCM" as const] }
-    await same(() => jose.compactDecrypt(token, kek, opts), () => run(JsonWebEncryption.decryptCompact(token, kek, opts)))
+    await same(() => jose.compactDecrypt(token, kek, opts), () => run(encryption.decryptCompact(token, kek, opts)))
   })
 
   it("ECDH-ES epk containing a private component is rejected", async () => {
-    const keys = await keysFor("ECDH-ES")
+    const material = await keysFor("ECDH-ES")
     const token = await new jose.CompactEncrypt(payload).setProtectedHeader({ alg: "ECDH-ES", enc: "A256GCM" })
-      .encrypt(keys.signOrEncrypt.jose as any)
+      .encrypt(material.signOrEncrypt.jose as any)
     const [h, ...rest] = token.split(".")
     const header = JSON.parse(new TextDecoder().decode(jose.base64url.decode(h)))
     header.epk.d = "AAAA"
     const bad = [b64u(JSON.stringify(header)), ...rest].join(".")
     await same(
-      () => jose.compactDecrypt(bad, keys.verifyOrDecrypt.jose as any),
-      () => run(JsonWebEncryption.decryptCompact(bad, keys.verifyOrDecrypt.jwk as any))
+      () => jose.compactDecrypt(bad, material.verifyOrDecrypt.jose as any),
+      () => run(encryption.decryptCompact(bad, material.verifyOrDecrypt.jwk as any))
     )
   })
 })

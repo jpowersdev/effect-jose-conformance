@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest"
 import { jwksEndpoint } from "../src/jwksEndpoint.ts"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run, anySignatureAlgorithm } from "../src/runtime.ts"
+import { anySignatureAlgorithm, keySets, run, signatures } from "../src/runtime.ts"
 
 const payload = new TextEncoder().encode("payload")
 
@@ -41,7 +41,7 @@ describe("embedded JWK verification matches jose's EmbeddedJWK", () => {
 
   it.each(scenarios)("%s", async (_, makeToken) => {
     const token = await makeToken()
-    expect(await settle(run(JsonWebSignature.verifyCompact(token, JsonWebSignature.embeddedKey, { algorithms: anySignatureAlgorithm })))).toEqual(
+    expect(await settle(run(signatures.verifyCompact(token, JsonWebSignature.embeddedKey, { algorithms: anySignatureAlgorithm })))).toEqual(
       await settle(jose.compactVerify(token, jose.EmbeddedJWK))
     )
   })
@@ -57,7 +57,7 @@ describe("several matching keys", () => {
 
   it("fails by default, like jose", async () => {
     const { jwks, token } = await setup()
-    expect(await settle(run(Effect.flatMap(JsonWebKeySet.makeLocal(jwks as any), (r) => JsonWebSignature.verifyCompact(token, r, { algorithms: anySignatureAlgorithm })))))
+    expect(await settle(run(Effect.flatMap(keySets.makeLocal(jwks as any), (r) => signatures.verifyCompact(token, r, { algorithms: anySignatureAlgorithm })))))
       .toEqual(await settle(jose.compactVerify(token, jose.createLocalJWKSet(jwks))))
   })
 
@@ -77,8 +77,8 @@ describe("several matching keys", () => {
       }
     }
     const ours = await run(Effect.flatMap(
-      JsonWebKeySet.makeLocal(jwks as any, { multipleMatches: "tryEach" }),
-      (resolver) => JsonWebSignature.verifyCompact(token, resolver, { algorithms: anySignatureAlgorithm })
+      keySets.makeLocal(jwks as any, { multipleMatches: "tryEach" }),
+      (resolver) => signatures.verifyCompact(token, resolver, { algorithms: anySignatureAlgorithm })
     ))
     expect(joseResult).toBeDefined()
     expect(ours.payload).toEqual(joseResult!.payload)
@@ -95,8 +95,8 @@ describe("remote key set storage", () => {
     )
     const ours = await jwksEndpoint(jwks)
     const coldStart = Effect.gen(function*() {
-      const resolver = yield* JsonWebKeySet.makeRemote(ours.url, { storage: "keyValueStore", allowInsecureHttp: true })
-      return yield* JsonWebSignature.verifyCompact(token, resolver, { algorithms: anySignatureAlgorithm })
+      const resolver = yield* keySets.makeRemote(ours.url, { storage: "keyValueStore", allowInsecureHttp: true })
+      return yield* signatures.verifyCompact(token, resolver, { algorithms: anySignatureAlgorithm })
     })
     await run(Effect.gen(function*() {
       yield* coldStart

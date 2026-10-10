@@ -19,5 +19,19 @@ import * as JsonWebSignature from "effect/jose/JsonWebSignature"
 import * as JsonWebToken from "effect/jose/JsonWebToken"
 
 // Everything: one use of every module.
-const program = Effect.all([JsonWebToken.sign({}, { key: secret, protectedHeader: { alg: "HS256" }, expirationTime: "1 hour" }), JsonWebToken.verify(token, secret, { algorithms: ["HS256"] }), JsonWebToken.encrypt({}, { key: secret, protectedHeader: { alg: "dir", enc: "A256GCM" }, expirationTime: "1 hour" }), JsonWebToken.decrypt(token, secret), JsonWebSignature.verifyGeneral({ payload: "", signatures: [] }, secret, { algorithms: ["HS256"] }), JsonWebEncryption.decryptGeneral({ ciphertext: "", recipients: [] }, secret), JsonWebKey.importPkcs8("", "ES256"), JsonWebKey.thumbprint({ kty: "oct", k: "" }), JsonWebKeySet.makeLocal({ keys: [] })])
-Effect.runPromise(Effect.provideService(program, Crypto.Crypto, crypto) as any)
+const program = Effect.gen(function*() {
+  const jwt = yield* JsonWebToken.JsonWebToken
+  const jws = yield* JsonWebSignature.JsonWebSignature
+  const jwe = yield* JsonWebEncryption.JsonWebEncryption
+  const keys = yield* JsonWebKey.JsonWebKey
+  const keySets = yield* JsonWebKeySet.JsonWebKeySet
+  return yield* Effect.all([jwt.sign({}, { key: secret, protectedHeader: { alg: "HS256" }, expirationTime: "1 hour" }), jwt.verify(token, secret, { algorithms: ["HS256"] }), jwt.encrypt({}, { key: secret, protectedHeader: { alg: "dir", enc: "A256GCM" }, expirationTime: "1 hour" }), jwt.decrypt(token, secret), jws.verifyGeneral({ payload: "", signatures: [] }, secret, { algorithms: ["HS256"] }), jwe.decryptGeneral({ ciphertext: "", recipients: [] }, secret), keys.importPkcs8("", "ES256"), keys.thumbprint({ kty: "oct", k: "" }), keySets.makeLocal({ keys: [] })])
+})
+Effect.runPromise(program.pipe(
+  Effect.provideServiceEffect(JsonWebToken.JsonWebToken, JsonWebToken.make),
+  Effect.provideServiceEffect(JsonWebSignature.JsonWebSignature, JsonWebSignature.make),
+  Effect.provideServiceEffect(JsonWebEncryption.JsonWebEncryption, JsonWebEncryption.make),
+  Effect.provideServiceEffect(JsonWebKey.JsonWebKey, JsonWebKey.make),
+  Effect.provideServiceEffect(JsonWebKeySet.JsonWebKeySet, JsonWebKeySet.make),
+  Effect.provideService(Crypto.Crypto, crypto)
+) as any)

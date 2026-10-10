@@ -14,4 +14,5 @@ const secret = new Uint8Array(32)
 
 import * as JsonWebToken from "effect/jose/JsonWebToken"
 
-Effect.runPromise(Effect.provideService(JsonWebToken.verify(token, secret, { algorithms: ["HS256"] }), Crypto.Crypto, crypto))
+const program = JsonWebToken.JsonWebToken.use((jwt) => jwt.verify(token, secret, { algorithms: ["HS256"] }))
+Effect.runPromise(program.pipe(Effect.provideServiceEffect(JsonWebToken.JsonWebToken, JsonWebToken.make), Effect.provideService(Crypto.Crypto, crypto)))

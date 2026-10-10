@@ -16,5 +16,15 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as JsonWebKeySet from "effect/jose/JsonWebKeySet"
 import * as JsonWebToken from "effect/jose/JsonWebToken"
 
-const program = Effect.flatMap(JsonWebKeySet.makeRemote("https://issuer.example/.well-known/jwks.json"), (keys) => JsonWebToken.verify(token, keys, { algorithms: ["RS256", "ES256"], issuer: "https://issuer.example" }))
-Effect.runPromise(program.pipe(Effect.provide(FetchHttpClient.layer), Effect.provideService(Crypto.Crypto, crypto)))
+const program = Effect.gen(function*() {
+  const keySets = yield* JsonWebKeySet.JsonWebKeySet
+  const jwt = yield* JsonWebToken.JsonWebToken
+  const keySet = yield* keySets.makeRemote("https://issuer.example/.well-known/jwks.json")
+  return yield* jwt.verify(token, keySet, { algorithms: ["RS256", "ES256"], issuer: "https://issuer.example" })
+})
+Effect.runPromise(program.pipe(
+  Effect.provideServiceEffect(JsonWebKeySet.JsonWebKeySet, JsonWebKeySet.make),
+  Effect.provideServiceEffect(JsonWebToken.JsonWebToken, JsonWebToken.make),
+  Effect.provide(FetchHttpClient.layer),
+  Effect.provideService(Crypto.Crypto, crypto)
+))

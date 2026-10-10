@@ -27,5 +27,15 @@ import * as JsonWebToken from "effect/jose/JsonWebToken"
 declare const token: string
 // The app already makes HTTP requests.
 Effect.runPromise(HttpClient.get("https://api.example").pipe(Effect.provide(FetchHttpClient.layer)))
-const verify = Effect.flatMap(JsonWebKeySet.makeRemote("https://issuer.example/.well-known/jwks.json"), (keys) => JsonWebToken.verify(token, keys, { algorithms: ["RS256", "ES256"], issuer: "https://issuer.example" }))
-Effect.runPromise(verify.pipe(Effect.provide(FetchHttpClient.layer), Effect.provideService(Crypto.Crypto, crypto)))
+const verify = Effect.gen(function*() {
+  const keySets = yield* JsonWebKeySet.JsonWebKeySet
+  const jwt = yield* JsonWebToken.JsonWebToken
+  const keySet = yield* keySets.makeRemote("https://issuer.example/.well-known/jwks.json")
+  return yield* jwt.verify(token, keySet, { algorithms: ["RS256", "ES256"], issuer: "https://issuer.example" })
+})
+Effect.runPromise(verify.pipe(
+  Effect.provideServiceEffect(JsonWebKeySet.JsonWebKeySet, JsonWebKeySet.make),
+  Effect.provideServiceEffect(JsonWebToken.JsonWebToken, JsonWebToken.make),
+  Effect.provide(FetchHttpClient.layer),
+  Effect.provideService(Crypto.Crypto, crypto)
+))

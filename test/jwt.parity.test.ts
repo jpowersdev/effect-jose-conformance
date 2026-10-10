@@ -6,7 +6,7 @@ import { JsonWebToken } from "effect/jose"
 import { describe, expect, it } from "vitest"
 import { keysFor } from "../src/keys.ts"
 import { settle } from "../src/outcome.ts"
-import { run, runToken, anySignatureAlgorithm } from "../src/runtime.ts"
+import { anySignatureAlgorithm, run, runToken, tokens } from "../src/runtime.ts"
 
 const NOW = 1_700_000_000 // seconds
 const currentDate = new Date(NOW * 1000)
@@ -80,7 +80,7 @@ describe("JWT claim validation parity with jose", () => {
       ...(options.clockToleranceSeconds !== undefined ? { clockTolerance: options.clockToleranceSeconds } : {}),
       ...(options.maxTokenAgeSeconds !== undefined ? { maxTokenAge: options.maxTokenAgeSeconds } : {})
     }))
-    const effectOutcome = await settle(run(JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, currentDate,
+    const effectOutcome = await settle(run(tokens.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, currentDate,
       ...(options.issuer !== undefined ? { issuer: options.issuer } : {}),
       ...(options.subject !== undefined ? { subject: options.subject } : {}),
       ...(options.audience !== undefined ? { audience: options.audience } : {}),
@@ -103,7 +103,7 @@ describe("JWT claim validation parity with jose", () => {
       }
       let effectClaim: unknown
       try {
-        await run(JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, currentDate, ...(options.issuer ? { issuer: options.issuer } : {}) }))
+        await run(tokens.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, currentDate, ...(options.issuer ? { issuer: options.issuer } : {}) }))
       } catch (e) {
         effectClaim = (e as { claim?: unknown }).claim
       }
@@ -115,10 +115,10 @@ describe("JWT claim validation parity with jose", () => {
 describe("JWT issuance interop", () => {
   for (const alg of ["HS256", "RS256", "PS256", "ES256", "EdDSA"] as const) {
     it(`effect issues (${alg}) → jose verifies with identical claims`, async () => {
-      const keys = await keysFor(alg)
+      const material = await keysFor(alg)
       const token = await runToken(
-        TestClock.setTime(NOW * 1000).pipe(Effect.andThen(JsonWebToken.sign({ role: "admin", nested: { a: [1, 2] } }, {
-          key: keys.signOrEncrypt.jwk as any,
+        TestClock.setTime(NOW * 1000).pipe(Effect.andThen(tokens.sign({ role: "admin", nested: { a: [1, 2] } }, {
+          key: material.signOrEncrypt.jwk as any,
           protectedHeader: { alg, typ: "JWT" },
           issuer: "urn:iss",
           subject: "user-1",
@@ -129,7 +129,7 @@ describe("JWT issuance interop", () => {
           expirationTime: "2 hours"
         })), Effect.provide(TestClock.layer()))
       )
-      const { payload } = await jose.jwtVerify(token, keys.verifyOrDecrypt.jose as any, {
+      const { payload } = await jose.jwtVerify(token, material.verifyOrDecrypt.jose as any, {
         issuer: "urn:iss",
         audience: "b",
         subject: "user-1",
@@ -142,7 +142,7 @@ describe("JWT issuance interop", () => {
   it("relative times are computed from the Effect Clock", async () => {
     const program = Effect.gen(function*() {
       yield* TestClock.setTime(NOW * 1000)
-      return yield* JsonWebToken.sign({}, {
+      return yield* tokens.sign({}, {
         key: secret,
         protectedHeader: { alg: "HS256" },
         issuedAt: true,
@@ -160,7 +160,7 @@ describe("JWT issuance interop", () => {
     const at = (seconds: number) =>
       settle(run(Effect.gen(function*() {
         yield* TestClock.setTime(seconds * 1000)
-        return yield* JsonWebToken.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false })
+        return yield* tokens.verify(token, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false })
       }).pipe(Effect.provide(TestClock.layer()))))
     expect(await at(NOW)).toEqual({ ok: true })
     expect(await at(NOW + 10)).toEqual({ ok: false, code: "ERR_JWT_EXPIRED" })
@@ -169,33 +169,33 @@ describe("JWT issuance interop", () => {
   it("decodes claims with a Schema", async () => {
     const token = await signWithJose({ sub: "u1", role: "admin" })
     const Claims = Schema.Struct({ ...JsonWebToken.RegisteredClaims.fields, role: Schema.Literals(["admin", "user"]) })
-    const { payload } = await run(JsonWebToken.verify(token, secret, { requireExpiration: false, schema: Claims, algorithms: ["HS256"] }))
+    const { payload } = await run(tokens.verify(token, secret, { requireExpiration: false, schema: Claims, algorithms: ["HS256"] }))
     expect(payload.role).toBe("admin")
     const bad = await signWithJose({ role: "root" })
-    const outcome = await settle(run(JsonWebToken.verify(bad, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, schema: Claims })))
+    const outcome = await settle(run(tokens.verify(bad, secret, { algorithms: anySignatureAlgorithm, requireExpiration: false, schema: Claims })))
     expect(outcome).toEqual({ ok: false, code: "ERR_JWT_CLAIM_VALIDATION_FAILED" })
   })
 })
 
 describe("encrypted JWT interop", () => {
   it("effect encrypts → jose decrypts, and back", async () => {
-    const keys = await keysFor("ECDH-ES+A256KW")
-    const token = await runToken(JsonWebToken.encrypt({ role: "admin" }, {
-      key: keys.signOrEncrypt.jwk as any,
+    const material = await keysFor("ECDH-ES+A256KW")
+    const token = await runToken(tokens.encrypt({ role: "admin" }, {
+      key: material.signOrEncrypt.jwk as any,
       protectedHeader: { alg: "ECDH-ES+A256KW", enc: "A256GCM" },
       issuer: "urn:iss",
       replicateIssuerAsHeader: true,
       expirationTime: "1 hour"
     }))
-    const theirs = await jose.jwtDecrypt(token, keys.verifyOrDecrypt.jose as any, { issuer: "urn:iss" })
+    const theirs = await jose.jwtDecrypt(token, material.verifyOrDecrypt.jose as any, { issuer: "urn:iss" })
     expect(theirs.payload.role).toBe("admin")
     expect(theirs.protectedHeader.iss).toBe("urn:iss")
 
     const joseToken = await new jose.EncryptJWT({ role: "user" }).setProtectedHeader({
       alg: "ECDH-ES+A256KW",
       enc: "A256GCM"
-    }).setIssuer("urn:iss").replicateIssuerAsHeader().encrypt(keys.signOrEncrypt.jose as any)
-    const ours = await run(JsonWebToken.decrypt(joseToken, keys.verifyOrDecrypt.jwk as any, { issuer: "urn:iss", requireExpiration: false }))
+    }).setIssuer("urn:iss").replicateIssuerAsHeader().encrypt(material.signOrEncrypt.jose as any)
+    const ours = await run(tokens.decrypt(joseToken, material.verifyOrDecrypt.jwk as any, { issuer: "urn:iss", requireExpiration: false }))
     expect(ours.payload.role).toBe("user")
   })
 })

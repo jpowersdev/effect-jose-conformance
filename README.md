@@ -21,8 +21,8 @@ runtime and checks what it logs.
 ## Bundle size
 
 See [docs/bundle-size.md](docs/bundle-size.md). In an application that
-already uses `Schema`, verifying a JWT adds 8.3 KB gzipped, against 5.6 KB for
-`jose`.
+already uses `Schema`, verifying a JWT adds 14.7 KB gzipped, against 5.6 KB for
+`jose`; about 6 KB of that is JWE code the `JsonWebToken` service brings along.
 
 ## What is tested
 
