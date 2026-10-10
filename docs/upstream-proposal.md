@@ -5,7 +5,7 @@ opened upstream yet.
 
 - **Implementation:** [`jose` branch of jpowersdev/effect](https://github.com/jpowersdev/effect/tree/jose)
 - **Conformance tests:** [jpowersdev/effect-jose-conformance](https://github.com/jpowersdev/effect-jose-conformance)
-- **Examples of common workflows:** [examples/](../examples)
+- **Example:** [HttpApi bearer auth against a remote key set](../examples/http-api-bearer-auth.ts)
 - **Bundle size:** [bundle-size.md](bundle-size.md)
 
 ## Summary
@@ -205,8 +205,8 @@ A separate conformance repository pins the fork and tests it against
 - **Every runtime, through a Nix flake:** Node.js 22, 24, and 26, Deno, Bun,
   Chromium, Firefox, and WebKit. Runtime-specific behaviour (Chromium's lack of
   192-bit AES) is asserted rather than skipped.
-- **Totals:** 539 tests on each server runtime and 1,617 in browsers, including
-  runnable examples of common workflows. The fork
+- **Totals:** 533 tests on each server runtime and 1,599 in browsers, including a
+  runnable end-to-end example. The fork
   adds 89 unit tests and 7 type tests of its own, plus tests for the `Crypto` key
   operations.
 

@@ -7,21 +7,15 @@ branch of a fork of [Effect](https://github.com/Effect-TS/effect).
 The fork is pinned as a git submodule at `vendor/effect`, and its `effect`
 package is linked directly from source, so no build step is needed.
 
-## Examples
+## Example
 
-Runnable examples of common workflows, each a single file you can run with
-`node examples/<file>.ts` (also Deno or Bun). `test/examples.test.ts` runs
-them all, on every runtime, so they stay correct.
-
-| Example | Workflow |
-| --- | --- |
-| [01-session-tokens](examples/01-session-tokens.ts) | Issue and verify session tokens with a shared secret, typed claims, and a secret from `Config` |
-| [02-http-api-bearer-auth](examples/02-http-api-bearer-auth.ts) | Protect an `HttpApi` with bearer tokens through `HttpApiMiddleware` |
-| [03-identity-provider-tokens](examples/03-identity-provider-tokens.ts) | Verify access tokens from an identity provider (Auth0, Okta, Cognito, ...) against its remote key set |
-| [04-publish-jwks-and-rotate-keys](examples/04-publish-jwks-and-rotate-keys.ts) | Publish a key set and rotate signing keys without downtime |
-| [05-service-to-service](examples/05-service-to-service.ts) | Authenticate calls between services with short-lived tokens and PEM keys from config |
-| [06-encrypted-tokens](examples/06-encrypted-tokens.ts) | Encrypt session state (JWE), redact sensitive claims, and rotate secrets |
-| [07-testing-with-testclock](examples/07-testing-with-testclock.ts) | Test expiry deterministically with `TestClock` |
+[`examples/http-api-bearer-auth.ts`](examples/http-api-bearer-auth.ts) shows
+the most common workflow end to end: an auth server publishes its key set and
+issues tokens, an `HttpApi` verifies bearer tokens against that remote key set
+in middleware, and a typed `HttpApiClient` calls it with a valid, missing, and
+forged token. Everything runs in memory, so `node examples/http-api-bearer-auth.ts`
+(or Deno or Bun) runs it directly, and `test/examples.test.ts` runs it on every
+runtime.
 
 ## Bundle size
 
